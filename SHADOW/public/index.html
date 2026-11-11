@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#090711"><title>QUASAR · SHADOW PANEL</title>
+<link rel="stylesheet" href="/shadowxdiablos/style.css">
+</head>
+<body>
+<div id="loginView" class="login-wrap">
+  <div class="login-card">
+    <div class="logo-mark">S</div><p class="eyebrow">CONTROL CENTER</p>
+    <h1>SHADOW <span>QUASAR</span></h1>
+    <p class="muted">لوحة إدارة QUASAR</p>
+    <form id="loginForm"><label>كلمة مرور اللوحة</label><input id="password" type="password" autocomplete="current-password" required placeholder="أدخل كلمة المرور"><button class="primary">دخول آمن</button></form>
+    <p id="loginError" class="error"></p>
+  </div>
+</div>
+<div id="appView" class="app hidden">
+  <aside class="sidebar">
+    <div class="brand"><div class="mini-logo">Q</div><div><b>QUASAR</b><small>SHADOW × QUASAR CONTROL</small></div></div>
+    <nav>
+      <button class="nav active" data-page="session-picker">◈ الجلسات</button>
+      <button class="nav" data-page="home">◈ الرئيسية</button>
+      <button class="nav" data-page="commands">⌘ الأوامر</button>
+      <button class="nav" data-page="groups">▦ المجموعات</button>
+      <button class="nav" data-page="admins">♙ المطورون</button>
+      <button class="nav" data-page="settings">⚙ الإعدادات</button>
+      <button class="nav" data-page="nickname">♧ كنية البوت</button>
+      <button class="nav" data-page="dev-nickname">♧ كنية المطور</button>
+      <button class="nav" data-page="session">♧ ملف الجلسة</button>
+      <button class="nav" data-page="files">▤ مدير الملفات</button>
+    </nav>
+    <button id="logout" class="logout">تسجيل الخروج ↗</button>
+  </aside>
+  <main class="main">
+    <header><div><p class="eyebrow">QUASAR × SHADOW / MANAGEMENT</p><h2 id="pageTitle">الرئيسية</h2></div><div class="live"><i></i> لوحة التحكم</div></header>
+
+    <section id="page-session-picker" class="page">
+      <div class="hero">
+        <div>
+          <p class="eyebrow">SHADOW × QUASAR CONTROL</p>
+          <h1>اختر <span>الجلسة</span></h1>
+          <p>حدد جلسة Facebook التي تريد إدارتها.</p>
+        </div>
+        <div class="orb">Q</div>
+      </div>
+      <div class="session-cards">
+        <button type="button" class="session-card" data-session="1">
+          <span class="session-number">01</span>
+          <b>الجلسة الأولى</b>
+          <small>الدخول إلى لوحة الجلسة</small>
+        </button>
+        <button type="button" class="session-card" data-session="2">
+          <span class="session-number">02</span>
+          <b>الجلسة الثانية</b>
+          <small>الدخول إلى لوحة الجلسة</small>
+        </button>
+        <button type="button" class="session-card" data-session="3">
+          <span class="session-number">03</span>
+          <b>الجلسة الثالثة</b>
+          <small>الدخول إلى لوحة الجلسة</small>
+        </button>
+      </div>
+    </section>
+
+    <section id="page-home" class="page hidden">
+      <div class="hero"><div><p class="eyebrow">WELCOME BACK</p><h1>مرحباً بك في <span>QUASAR</span></h1><p>تحكم في إعدادات البوت من مكان واحد.</p></div><div class="orb">Q</div></div>
+      <div class="stats">
+        <article class="stat"><small>حالة البوت</small><strong id="botStatus">جارٍ الفحص</strong><em>الاتصال بعملية البوت</em></article>
+        <article class="stat"><small>الأوامر</small><strong id="commandCount">—</strong><em>ملفات commands</em></article>
+        <article class="stat"><small>المجموعات المحمية</small><strong id="groupCount">—</strong><em>من data.json</em></article>
+        <article class="stat"><small>الرسائل المحفوظة</small><strong id="savedCount">—</strong><em>قوالب محفوظة</em></article>
+      </div>
+      <div class="panel-card bot-control">
+        <div class="card-head"><h3>التحكم بالبوت</h3><span id="processStatus" class="tag">جارٍ الفحص</span></div>
+        <div class="bot-actions">
+          <button type="button" id="botStart" class="bot-start">▶ تشغيل</button>
+          <button type="button" id="botRestart" class="bot-restart">↻ إعادة تشغيل</button>
+          <button type="button" id="botStop" class="bot-stop">■ إيقاف</button>
+        </div>
+        <div class="bot-meta"><span>مدة التشغيل</span><b id="botUptime">00:00:00</b><span>PID</span><b id="botPid">—</b></div>
+        <div class="card-head terminal-head"><h3>Terminal • سجلات البوت</h3><button type="button" class="ghost" id="clearTerminal">مسح العرض</button></div>
+        <pre id="botTerminal" class="bot-terminal">بانتظار سجلات البوت...</pre>
+        <p class="muted">السجلات للعرض فقط، ولا يمكن تنفيذ أوامر النظام من هنا.</p>
+      </div>
+      <div class="panel-card"><div class="card-head"><h3>معلومات التشغيل</h3><button class="ghost" id="refresh">تحديث ↻</button></div><div class="info-grid"><div><small>معرّف البوت</small><b id="botId">غير متاح</b></div><div><small>البادئة</small><b id="prefixInfo">!</b></div><div><small>الأوامر بدون بادئة</small><b id="freeInfo">—</b></div><div><small>المجموعات المقفلة</small><b id="lockedInfo">—</b></div></div></div>
+    </section>
+    <section id="page-commands" class="page hidden">
+      <div class="panel-card">
+        <div class="card-head"><h3>إدارة الأوامر المخصصة</h3><span class="tag">لكل جلسة بشكل مستقل</span></div>
+        <p class="muted">أضف أمرًا برمجيًا جديدًا بكتابة اسمه وكود JavaScript الخاص به.</p>
+        <form id="customCommandForm">
+          <label for="customCommandName">اسم الأمر</label>
+          <input id="customCommandName" maxlength="24" placeholder="مثال: مرحبا" required>
+          <label for="customCommandCode">كود JavaScript</label>
+          <textarea id="customCommandCode" maxlength="12000" rows="12" spellcheck="false" placeholder="async function(api, event, args, startTime, loadData, saveData, automicTimers, config, hostingInfo, botSentMessages, BOT_ID) {&#10;  api.sendMessage('أهلاً!', event.threadID);&#10;}" required></textarea>
+          <p class="muted">الكود يعمل بمعاملات الأوامر المدمجة نفسها. لا تستخدم أكوادًا من مصادر غير موثوقة.</p>
+          <div class="inline-form">
+            <button type="submit" class="primary" id="saveCustomCommand">حفظ الأمر</button>
+            <button type="button" class="ghost" id="cancelCustomCommand">إلغاء التعديل</button>
+          </div>
+        </form>
+        <p id="customCommandMsg" class="muted"></p>
+      </div>
+      <div class="panel-card">
+        <h3>الأوامر المخصصة</h3>
+        <div id="commandsList" class="rows"></div>
+      </div>
+      <div class="panel-card">
+        <h3>الأوامر المدمجة</h3>
+        <p class="muted">هذه الأوامر موجودة في مجلد commands ولا تتأثر بإدارة الأوامر المخصصة.</p>
+        <div id="builtInCommandsList" class="rows"></div>
+        <div id="builtInEditor" class="panel-card hidden" style="margin-top:14px">
+          <h3 id="builtInEditorTitle">تعديل أمر مدمج</h3>
+          <form id="builtInCommandForm">
+            <label for="builtInCommandName">اسم الأمر</label>
+            <input id="builtInCommandName" maxlength="24" required>
+            <label for="builtInCommandCode">كود JavaScript</label>
+            <textarea id="builtInCommandCode" maxlength="30000" rows="14" spellcheck="false" required></textarea>
+            <div class="inline-form">
+              <button type="submit" class="primary" id="saveBuiltInCommand">حفظ التعديل</button>
+              <button type="button" class="ghost" id="cancelBuiltInCommand">إلغاء</button>
+            </div>
+          </form>
+          <p id="builtInCommandMsg" class="muted"></p>
+        </div>
+      </div>
+    </section>
+    <section id="page-groups" class="page hidden"><div class="panel-card"><div class="card-head"><h3>مجموعات البوت</h3><button class="ghost" id="refreshGroups">تحديث ↻</button></div><div id="groupsList" class="rows"></div></div></section>
+    <section id="page-admins" class="page hidden">
+      <div class="panel-card">
+        <h3>معرّف المطوّر الأساسي</h3>
+        <p class="muted">هذا المعرّف هو صاحب صلاحية المطوّر الأساسية التي يعتمد عليها البوت.</p>
+        <form id="developerForm" class="inline-form"><input id="developerId" inputmode="numeric" maxlength="25" placeholder="معرّف المطور الأول" required><input id="developerId2" inputmode="numeric" maxlength="25" placeholder="معرّف المطور الثاني (اختياري)"><button class="primary">حفظ المعرفين</button></form>
+        <p id="developerMsg" class="muted"></p>
+      </div>
+      <div class="panel-card"><h3>إدارة معرّفات المطورين الإضافية</h3><p class="muted">هذه القائمة تُحفظ في data.json.</p><form id="adminForm" class="inline-form"><input id="adminId" inputmode="numeric" placeholder="Facebook ID" required><button class="primary">إضافة</button></form><div id="adminsList" class="rows"></div></div></section>
+    <section id="page-settings" class="page hidden"><div class="panel-card"><h3>إعدادات الأوامر</h3><form id="settingsForm"><label>بادئة الأوامر</label><input id="prefix" maxlength="5" required><label class="switch-row"><span>السماح بتنفيذ الأوامر دون بادئة</span><input id="freePrefix" type="checkbox"><i></i></label><button class="primary">حفظ الإعدادات</button></form><p id="settingsMsg" class="muted"></p></div></section>
+    <section id="page-nickname" class="page hidden">
+      <div class="panel-card">
+        <h3>إدارة كنية البوت</h3>
+        <p class="muted">حدد الكنية التي تريد أن يستخدمها البوت في جميع المجموعات.</p>
+
+        <form id="nicknameForm">
+          <label for="botNickname">الكنية الموحدة</label>
+          <input id="botNickname" maxlength="80" placeholder="اكتب كنية البوت هنا" required>
+
+          <label class="switch-row">
+            <span>تشغيل الاسترجاع التلقائي</span>
+            <input id="nicknameGuard" type="checkbox">
+            <i></i>
+          </label>
+
+          <p class="muted">عند التشغيل، يفحص البوت الكنية كل 7 ثوانٍ ويحاول استرجاعها إذا تغيرت.</p>
+          <button class="primary">حفظ إعدادات الكنية</button>
+        </form>
+
+        <p id="nicknameStatus" class="muted"></p>
+        <p id="nicknameMsg" class="muted"></p>
+      </div>
+    </section>
+
+    <section id="page-dev-nickname" class="page hidden">
+      <div class="panel-card">
+        <h3>إدارة كنية المطور</h3>
+        <p class="muted">حدد الكنية التي تريد حمايتها لحساب المطور في المجموعات.</p>
+        <form id="developerNicknameForm">
+          <label for="developerNickname">كنية المطور</label>
+          <input id="developerNickname" maxlength="80" placeholder="اكتب كنية المطور هنا" required>
+          <p class="muted">تستخدم الحماية الدورية الحالية نفسها المفعّلة من صفحة كنية البوت.</p>
+          <button class="primary">حفظ كنية المطور</button>
+        </form>
+        <p id="developerNicknameMsg" class="muted"></p>
+      </div>
+    </section>
+
+    <section id="page-session" class="page hidden">
+      <div class="panel-card">
+        <h3>إضافة كوكيز Facebook</h3>
+        <p class="muted">ألصق JSON الجلسة كاملاً بصيغة appState أو نص الكوكيز التقليدي.</p>
+        <form id="cookiesForm">
+          <label for="cookiesInput">كوكيز فيسبوك</label>
+          <textarea id="cookiesInput" rows="7" placeholder='[{"key":"c_user","value":"..."},{"key":"xs","value":"..."}]' required></textarea>
+          <button class="primary">تحويل وحفظ الكوكيز</button>
+        </form>
+        <p id="cookiesMsg" class="muted"></p>
+        <p class="warning">الكوكيز تمنح وصولاً إلى حسابك. لا تشاركها مع أي شخص، واستخدم اللوحة محلياً فقط. بعد الحفظ أعد تشغيل البوت.</p>
+      </div>
+      <div class="panel-card">
+        <h3>أو رفع ملف appState.json</h3>
+        <p class="muted">يمكنك أيضاً رفع ملف جلسة جاهز. سيتم الاحتفاظ بنسخة احتياطية من الجلسة السابقة.</p>
+        <form id="sessionForm"><label class="filebox">اختيار ملف JSON<input id="sessionFile" type="file" accept=".json,application/json" required></label><button class="primary">رفع ملف الجلسة</button></form>
+        <p id="sessionMsg"></p>
+      </div>
+    </section>
+    <section id="page-files" class="page hidden">
+      <div class="panel-card">
+        <div class="card-head">
+          <h3>مدير ملفات المشروع</h3>
+          <span class="tag">المشروع بالكامل</span>
+        </div>
+        <p class="muted">استعراض مجلدات المشروع وفتح الملفات النصية للقراءة.</p>
+        <div id="fileManager"></div>
+      </div>
+    </section>
+    <footer>QUASAR × SHADOW PANEL <span>•</span> محلي وآمن</footer>
+
+</main>
+</div>
+<script src="/shadowxdiablos/app.js"></script>
+</body></html>

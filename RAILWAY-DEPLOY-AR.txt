@@ -1,0 +1,15 @@
+QUASAR-SHADOW — Railway deployment
+
+1. Set Builder to Dockerfile.
+2. Set PANEL_PASSWORD in Railway Variables (at least 12 characters).
+3. Optional: attach a Volume at /data. The panel automatically uses RAILWAY_VOLUME_MOUNT_PATH.
+4. Generate a public domain in Railway Settings > Networking.
+5. Health check path: /healthz.
+6. Start command: npm start (starts the SHADOW control panel only).
+
+Security:
+- This package intentionally contains no appState, cookies, Telegram secrets, or runtime account data.
+- Session upload and refresh endpoints are disabled on Railway.
+- Only session 1 is accepted by the bot runtime. Sessions 2 and 3 are disabled.
+- Do not commit appState, cookies, .telegram.env, .env, or runtime data to GitHub.
+- The bot is not started by npm start. Do not start it until you have reviewed the session and security settings.

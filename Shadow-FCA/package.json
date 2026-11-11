@@ -1,0 +1,17 @@
+{
+  "name": "shadow-fca",
+  "version": "0.1.0",
+  "description": "Independent Messenger API client with session isolation and safe request handling",
+  "main": "index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "tough-cookie": "^4.1.4"
+  }
+}

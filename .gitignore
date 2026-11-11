@@ -1,0 +1,47 @@
+node_modules/
+**/node_modules/
+.git/
+
+# Runtime data and authentication material: keep in a private persistent volume.
+/config.json
+/appState*.json
+/data*.json
+/bot-status*.json
+/custom-commands*.json
+/.env
+/.env.*
+/.telegram.env
+/.telegram-secret*
+/telegram-auth.json
+/telegram-auth.json.*
+/telegram-activity.json
+/shadow-stats.json
+/.repeat-locks/
+/QUASAR-SAFE-BACKUP/
+/backups/
+
+# Local backups and packaged archives.
+*BACKUP*/
+*.zip
+*.log
+
+# QUASAR RAILWAY BACKUP RULES
+**/*.bak-*
+**/*.backup-*
+**/*BACKUP*/
+**/*backup*/
+
+# Exclude all backup variants and temporary project snapshots
+**/*backup*
+**/*.bak
+**/*.bak-*
+/QUASAR-*/
+/profile-test-*
+
+# Old root-level experiment artifacts
+/QUASAR-delete-*
+/QUASAR-name-*
+/QUASAR-remove-*
+/QUASAR-repeat-*
+/QUASAR-threadinfo-*
+/QUASAR-uptime-*
