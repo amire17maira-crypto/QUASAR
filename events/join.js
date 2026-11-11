@@ -1,5 +1,7 @@
 "use strict";
 
+const { getThreadInfoSafe } = require("../SHADOW/thread-info-guard");
+
 function setNickname(api, nickname, threadID, userID) {
   const method = [api.nickname, api.changeNickname, api.setNickname]
     .find(fn => typeof fn === "function");
@@ -61,7 +63,7 @@ module.exports = (api, event, config, loadData, saveData, automicTimers, BOT_ID)
 
   setTimeout(async () => {
     try {
-      const info = await api.getThreadInfo(threadID);
+      const info = await getThreadInfoSafe(api, threadID);
       const members = new Set((info?.participantIDs || []).map(String));
       const nicknames = info?.nicknames || info?.customNicknames || {};
 

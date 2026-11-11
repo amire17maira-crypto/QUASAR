@@ -235,13 +235,11 @@ ws3.login({ appState }, (err, api) => {
 
   // ===== SHADOW BOT NICKNAME GUARD =====
   let nicknameCheckRunning = false;
-  let groupInspectionRunning = false;
 
   let discoverGroupsRunning = false;
   async function discoverBotGroups() {
-    if (discoverGroupsRunning || groupInspectionRunning) return false;
+    if (discoverGroupsRunning) return false;
     discoverGroupsRunning = true;
-    groupInspectionRunning = true;
     try {
       const data = loadData();
       data.botGroups = Array.isArray(data.botGroups) ? data.botGroups : [];
@@ -274,14 +272,12 @@ ws3.login({ appState }, (err, api) => {
       return false;
     } finally {
       discoverGroupsRunning = false;
-      groupInspectionRunning = false;
     }
   }
 
   async function checkBotNicknames() {
-    if (nicknameCheckRunning || groupInspectionRunning) return;
+    if (nicknameCheckRunning) return;
     nicknameCheckRunning = true;
-    groupInspectionRunning = true;
 
     try {
       let latest = {};
@@ -360,7 +356,6 @@ ws3.login({ appState }, (err, api) => {
       }
     } finally {
       nicknameCheckRunning = false;
-      groupInspectionRunning = false;
     }
   }
 
@@ -369,9 +364,8 @@ ws3.login({ appState }, (err, api) => {
   const groupNameLastAttempt = new Map();
 
   async function checkSavedGroupNames() {
-    if (groupNameCheckRunning || groupInspectionRunning) return;
+    if (groupNameCheckRunning) return;
     groupNameCheckRunning = true;
-    groupInspectionRunning = true;
 
     try {
       const data = loadData();
@@ -424,7 +418,6 @@ ws3.login({ appState }, (err, api) => {
       console.log("خطأ في مراقبة أسماء المجموعات:", e.message);
     } finally {
       groupNameCheckRunning = false;
-      groupInspectionRunning = false;
     }
   }
 
@@ -444,7 +437,8 @@ ws3.login({ appState }, (err, api) => {
     if (
       refreshSignalRunning ||
       discoverGroupsRunning ||
-      groupInspectionRunning ||
+      nicknameCheckRunning ||
+      groupNameCheckRunning ||
       Date.now() < refreshSignalRetryAt ||
       !fs.existsSync(GROUP_REFRESH_SIGNAL_FILE)
     ) return;

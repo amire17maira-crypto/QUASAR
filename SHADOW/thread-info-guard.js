@@ -17,25 +17,24 @@ function activateCooldown(error) {
   blockedUntil = Date.now() + cooldown;
 
   if (Date.now() - lastNotice > 10000) {
-    console.log("[THREAD INFO GUARD] Request paused for", Math.round(cooldown / 1000), "seconds.");
+    console.log(
+      "[THREAD INFO GUARD] Request paused for",
+      Math.round(cooldown / 1000),
+      "seconds."
+    );
     lastNotice = Date.now();
   }
 }
 
-function getThreadInfoSafe(api, ids) {
+function enqueueRequest(operation, validate) {
   const task = queue.then(async () => {
     if (Date.now() < blockedUntil) {
       throw new Error("Facebook thread-info cooldown active; request skipped.");
     }
 
     try {
-      const result = await api.getThreadInfo(ids);
-      const emptyResult = result == null ||
-        (Array.isArray(ids) && typeof result === "object" && Object.keys(result).length === 0);
-
-      if (emptyResult) {
-        throw new Error("Unexpected thread response: empty result.");
-      }
+      const result = await operation();
+      validate(result);
 
       failures = 0;
       blockedUntil = 0;
@@ -46,30 +45,47 @@ function getThreadInfoSafe(api, ids) {
     }
   });
 
+  // Keep the queue usable after a failed request.
   queue = task.catch(() => {});
   return task;
 }
 
-function getThreadListSafe(api, ...args) {
-  const task = queue.then(async () => {
-    if (Date.now() < blockedUntil) {
-      throw new Error("Facebook thread-info cooldown active; request skipped.");
+function getThreadInfoSafe(api, ids) {
+  return enqueueRequest(
+    async () => {
+      if (!api || typeof api.getThreadInfo !== "function") {
+        throw new Error("Facebook getThreadInfo method is unavailable.");
+      }
+      return await api.getThreadInfo(ids);
+    },
+    result => {
+      if (
+        result == null ||
+        typeof result !== "object" ||
+        Array.isArray(result) ||
+        Object.keys(result).length === 0
+      ) {
+        throw new Error("Unexpected thread response: thread info must be a non-empty object.");
+      }
     }
+  );
+}
 
-    try {
+function getThreadListSafe(api, ...args) {
+  return enqueueRequest(
+    async () => {
       if (!api || typeof api.getThreadList !== "function") {
         throw new Error("Facebook getThreadList method is unavailable.");
       }
-
       return await api.getThreadList(...args);
-    } catch (error) {
-      activateCooldown(error);
-      throw error;
+    },
+    result => {
+      // An empty array is a valid end-of-list response.
+      if (!Array.isArray(result)) {
+        throw new Error("Unexpected thread response: thread list must be an array.");
+      }
     }
-  });
-
-  queue = task.catch(() => {});
-  return task;
+  );
 }
 
 function isCoolingDown() {

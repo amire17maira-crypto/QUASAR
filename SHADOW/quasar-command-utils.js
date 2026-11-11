@@ -43,7 +43,7 @@ async function invoke(api, methodName, args, timeoutMs = 30000) {
 
 async function getThreadInfo(api, threadID) {
   if (typeof api.getThreadInfo !== "function") throw new Error("تعذّر الوصول إلى معلومات المجموعة");
-  const info = await api.getThreadInfo(String(threadID));
+  const info = await getThreadInfoSafe(api, String(threadID));
   if (!info || typeof info !== "object") throw new Error("لم تصل معلومات المجموعة");
   return info;
 }
