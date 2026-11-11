@@ -63,15 +63,11 @@ module.exports = (api, event, _args, _startTime, loadData,
     for (const name of extras) output.push(`🔹 ${prefix}${name}`);
   }
 
-  output.push("🌠 QUASAR × SHADOW — Powered by ⚛️");
-  return api.sendMessage(output.join("\n"), event.threadID);
-  output.push(`👥 تغيير الكنيات: ${prefix}nik [الكنية]  |  ${prefix}nik إيقاف`);
   output.push(`⚡ بيس: ${prefix}بيس [النص] [الثواني]  |  ${prefix}بيس إيقاف`);
   output.push(`🚀 محرك: ${prefix}محرك 1/2/3 [النص]  |  ${prefix}محرك إيقاف`);
-  output.push(`🪪 البايو: ${prefix}بايو [النص]`);
-  output.push(`🔧 تحميل الأوامر: ${prefix}command load`);
-  output.push("\n💡 لا يعمل أكثر من نظام تكرار واحد في المجموعة نفسها.");
-  output.push("⏳ بيس: الحد الأدنى 60 ثانية.");
-  output.push("📨 أول رسالة هي النص نفسه، دون رسالة تفعيل منفصلة.");
-  output.push("🔤 الاختصارات: nm ← اسم | nik ← كنيات | cmd ← command");
+  output.push("⏱️ أقل فاصل لبيس: 12 ثانية.");
+  output.push("📨 أول رسالة هي النص فقط، مع الحفاظ على الأسطر.");
+  output.push("💡 لا يعمل أكثر من نظام تكرار واحد في المجموعة نفسها.");
+  output.push("🌠 QUASAR × SHADOW — Powered by ⚛️");
+  return api.sendMessage(output.join("\n"), event.threadID);
 };

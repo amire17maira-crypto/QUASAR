@@ -1,5 +1,5 @@
 const ws3 = require("ws3-fca");
-const { getThreadInfoSafe } = require("./thread-info-guard");
+const { getThreadInfoSafe, getThreadListSafe, isCoolingDown } = require("./thread-info-guard");
 const fs = require("fs");
 const path = require("path");
 const ROOT = path.resolve(__dirname, "..");
@@ -235,11 +235,13 @@ ws3.login({ appState }, (err, api) => {
 
   // ===== SHADOW BOT NICKNAME GUARD =====
   let nicknameCheckRunning = false;
+  let groupInspectionRunning = false;
 
   let discoverGroupsRunning = false;
   async function discoverBotGroups() {
-    if (discoverGroupsRunning) return false;
+    if (discoverGroupsRunning || groupInspectionRunning) return false;
     discoverGroupsRunning = true;
+    groupInspectionRunning = true;
     try {
       const data = loadData();
       data.botGroups = Array.isArray(data.botGroups) ? data.botGroups : [];
@@ -247,7 +249,7 @@ ws3.login({ appState }, (err, api) => {
       let cursor = null;
 
       for (let page = 0; page < 25; page++) {
-        const list = await api.getThreadList(100, cursor, ["INBOX", "ARCHIVED"]);
+        const list = await getThreadListSafe(api, 100, cursor, ["INBOX", "ARCHIVED"]);
         if (!Array.isArray(list) || !list.length) break;
 
         for (const thread of list) {
@@ -272,12 +274,14 @@ ws3.login({ appState }, (err, api) => {
       return false;
     } finally {
       discoverGroupsRunning = false;
+      groupInspectionRunning = false;
     }
   }
 
   async function checkBotNicknames() {
-    if (nicknameCheckRunning) return;
+    if (nicknameCheckRunning || groupInspectionRunning) return;
     nicknameCheckRunning = true;
+    groupInspectionRunning = true;
 
     try {
       let latest = {};
@@ -322,6 +326,7 @@ ws3.login({ appState }, (err, api) => {
           infos = await getThreadInfoSafe(api, batch);
         } catch (e) {
           console.log("تعذر فحص القروبات:", e.message);
+          if (isCoolingDown()) break;
           continue;
         }
 
@@ -355,6 +360,7 @@ ws3.login({ appState }, (err, api) => {
       }
     } finally {
       nicknameCheckRunning = false;
+      groupInspectionRunning = false;
     }
   }
 
@@ -363,8 +369,9 @@ ws3.login({ appState }, (err, api) => {
   const groupNameLastAttempt = new Map();
 
   async function checkSavedGroupNames() {
-    if (groupNameCheckRunning) return;
+    if (groupNameCheckRunning || groupInspectionRunning) return;
     groupNameCheckRunning = true;
+    groupInspectionRunning = true;
 
     try {
       const data = loadData();
@@ -379,7 +386,11 @@ ws3.login({ appState }, (err, api) => {
 
         try {
           infos = await getThreadInfoSafe(api, batch);
-        } catch {
+        } catch (e) {
+          if (isCoolingDown()) {
+            console.log("[GROUP NAME GUARD] Cooldown active; remaining batches skipped.");
+            break;
+          }
           continue;
         }
 
@@ -413,29 +424,63 @@ ws3.login({ appState }, (err, api) => {
       console.log("خطأ في مراقبة أسماء المجموعات:", e.message);
     } finally {
       groupNameCheckRunning = false;
+      groupInspectionRunning = false;
     }
   }
 
   discoverBotGroups().then(checkBotNicknames);
-  setInterval(checkBotNicknames, 9700);
+  setInterval(checkBotNicknames, 60000);
   checkSavedGroupNames();
-  setInterval(checkSavedGroupNames, 6900);
+  setInterval(checkSavedGroupNames, 90000);
 
   // تحديث قائمة القروبات دورياً لاكتشاف القروبات الجديدة
-  setInterval(discoverBotGroups, 60000);
+  setInterval(discoverBotGroups, 300000);
 
   // استقبال طلب تحديث فوري من لوحة التحكم لهذه الجلسة فقط.
   let refreshSignalRunning = false;
+  let refreshSignalRetryAt = 0;
+
   async function processGroupRefreshSignal() {
-    if (refreshSignalRunning || discoverGroupsRunning || !fs.existsSync(GROUP_REFRESH_SIGNAL_FILE)) return;
+    if (
+      refreshSignalRunning ||
+      discoverGroupsRunning ||
+      groupInspectionRunning ||
+      Date.now() < refreshSignalRetryAt ||
+      !fs.existsSync(GROUP_REFRESH_SIGNAL_FILE)
+    ) return;
+
     refreshSignalRunning = true;
+    let signalClaimed = false;
+
     try {
-      try { fs.unlinkSync(GROUP_REFRESH_SIGNAL_FILE); } catch (e) {
-        if (e.code !== "ENOENT") throw e;
+      try {
+        fs.unlinkSync(GROUP_REFRESH_SIGNAL_FILE);
+        signalClaimed = true;
+      } catch (e) {
+        if (e.code === "ENOENT") return;
+        throw e;
       }
-      await discoverBotGroups();
+
+      const updated = await discoverBotGroups();
+
+      if (!updated) {
+        fs.writeFileSync(GROUP_REFRESH_SIGNAL_FILE, "retry");
+        signalClaimed = false;
+        refreshSignalRetryAt = Date.now() + 30000;
+        console.log("[GROUP REFRESH] Update failed; retry delayed for 30 seconds.");
+        return;
+      }
+
       console.log("اكتمل طلب تحديث المجموعات من لوحة التحكم");
     } catch (e) {
+      if (signalClaimed) {
+        try {
+          fs.writeFileSync(GROUP_REFRESH_SIGNAL_FILE, "retry");
+        } catch (restoreError) {
+          console.log("[GROUP REFRESH] Could not restore signal:", restoreError.message);
+        }
+      }
+      refreshSignalRetryAt = Date.now() + 30000;
       console.log("تعذر تنفيذ تحديث المجموعات المطلوب:", e.message);
     } finally {
       refreshSignalRunning = false;
@@ -596,6 +641,12 @@ ws3.login({ appState }, (err, api) => {
       args = body.trim().split(/\s+/);
       cmd = args[0].toLowerCase();
     }
+
+    const rawCommandLine = body.startsWith(PREFIX)
+      ? body.slice(PREFIX.length)
+      : body;
+    const rawCommandMatch = rawCommandLine.match(/^\s*\S+(?:\s+([\s\S]*))?$/);
+    args.rawText = rawCommandMatch ? (rawCommandMatch[1] || "") : "";
 
     if (!cmd) return;
 

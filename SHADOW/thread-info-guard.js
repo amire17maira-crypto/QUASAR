@@ -50,4 +50,39 @@ function getThreadInfoSafe(api, ids) {
   return task;
 }
 
-module.exports = { getThreadInfoSafe };
+function getThreadListSafe(api, ...args) {
+  const task = queue.then(async () => {
+    if (Date.now() < blockedUntil) {
+      throw new Error("Facebook thread-info cooldown active; request skipped.");
+    }
+
+    try {
+      if (!api || typeof api.getThreadList !== "function") {
+        throw new Error("Facebook getThreadList method is unavailable.");
+      }
+
+      return await api.getThreadList(...args);
+    } catch (error) {
+      activateCooldown(error);
+      throw error;
+    }
+  });
+
+  queue = task.catch(() => {});
+  return task;
+}
+
+function isCoolingDown() {
+  return Date.now() < blockedUntil;
+}
+
+function getCooldownRemaining() {
+  return Math.max(0, blockedUntil - Date.now());
+}
+
+module.exports = {
+  getThreadInfoSafe,
+  getThreadListSafe,
+  isCoolingDown,
+  getCooldownRemaining
+};

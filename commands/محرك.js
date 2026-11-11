@@ -92,9 +92,9 @@ function scheduleEngine(state, engine) {
 async function startEngine(api, threadID, automicTimers, engineID, text) {
   const id = String(engineID);
   const intervalMs = ENGINE_INTERVALS[id];
-  const cleanText = String(text || "").trim();
+  const cleanText = String(text ?? "");
   if (!intervalMs) throw new Error("رقم المحرك غير صحيح");
-  if (!cleanText || cleanText.length > 1800) throw new Error("النص يجب أن يكون بين حرف واحد و1800 حرف");
+  if (!cleanText.trim()) throw new Error("أرسل نص الرسالة");
 
   const key = stateKey(threadID);
   if (automicTimers[key]) stopEngines(automicTimers, threadID);
@@ -129,13 +129,8 @@ async function startEngine(api, threadID, automicTimers, engineID, text) {
   state.engines[id] = engine;
 
   try {
-    // رسالة التفعيل الأولى هي النص نفسه؛ لا نرسل إشعار تفعيل منفصلًا.
-    const sessionID = String(process.env.SHADOW_SESSION_ID || "1");
-    await sendOnce(
-      api,
-      `${cleanText}\n\nبدء محرك ${id} رقم الجلسة [${sessionID}]\nعدد الثواني: ${intervalMs / 1000}\nللإيقاف اكتب: محرك إيقاف`,
-      String(threadID)
-    );
+    // أرسل النص الأصلي فقط دون معلومات تفعيل إضافية.
+    await sendOnce(api, cleanText, String(threadID));
     engine.lastSentAt = Date.now();
     console.log(`SHADOW ENGINE ${id} FIRST SEND:`, threadID);
   } catch (error) {
@@ -178,9 +173,11 @@ module.exports = async (api, event, args, startTime, loadData, saveData, automic
     );
   }
 
-  const text = args.slice(2).join(" ").trim();
-  if (!text || text.length > 1800) {
-    return api.sendMessage("⚠️ أرسل نص الرسالة بعد رقم المحرك (حتى 1800 حرف).", threadID);
+  const rawText = typeof args.rawText === "string" ? args.rawText : args.slice(1).join(" ");
+  const parsed = rawText.match(/^\s*([123])(?:[ \t\r\n]+([\s\S]*))?$/);
+  const text = parsed && Number(parsed[1]) === engineID ? (parsed[2] || "") : "";
+  if (!text.trim()) {
+    return api.sendMessage("⚠️ أرسل نص الرسالة بعد رقم المحرك.", threadID);
   }
 
   try {

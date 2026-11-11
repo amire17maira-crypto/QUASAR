@@ -76,10 +76,12 @@ module.exports = async (api, event, args, startTime, loadData, saveData, automic
     );
   }
 
-  const intervalToken = String(args[args.length - 1] || "").trim();
+  const rawText = typeof args.rawText === "string" ? args.rawText : args.slice(1).join(" ");
+  const parsed = rawText.match(/^(.*?)[ \t\r\n]+(\d+)$/s);
+  const intervalToken = parsed ? parsed[2] : "";
   const intervalSeconds = Number(intervalToken);
-  const text = args.slice(1, -1).join(" ").trim();
-  if (!text || text.length > 1800 || !/^\d+$/.test(intervalToken) ||
+  const text = parsed ? parsed[1] : "";
+  if (!text.trim() || !/^\d+$/.test(intervalToken) ||
       !Number.isSafeInteger(intervalSeconds) || intervalSeconds < MIN_INTERVAL_SECONDS || intervalSeconds > MAX_INTERVAL_SECONDS) {
     return api.sendMessage(
       "🔁 طريقة الاستخدام:\n" +
@@ -119,13 +121,8 @@ module.exports = async (api, event, args, startTime, loadData, saveData, automic
   automicTimers[key] = state;
 
   try {
-    // رسالة التفعيل نفسها هي النص المطلوب تكراره؛ لا توجد رسالة تأكيد إضافية.
-    const sessionID = String(process.env.SHADOW_SESSION_ID || "1");
-    await sendOnce(
-      api,
-      `${text}\n\nبدء بيس رقم الجلسة [${sessionID}]\nعدد الثواني: ${intervalSeconds}\nللإيقاف اكتب: بيس إيقاف`,
-      threadID
-    );
+    // أرسل النص الأصلي فقط دون معلومات تفعيل إضافية.
+    await sendOnce(api, text, threadID);
     state.lastSentAt = Date.now();
   } catch (error) {
     state.stop();

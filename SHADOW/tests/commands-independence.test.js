@@ -30,7 +30,7 @@ test("بيس ومحرك متبادلة الحجز ولا يعملان معًا �
   t.after(() => fs.rmSync(lockDir, { recursive: true, force: true }));
 
   assert.deepEqual(engine.ENGINE_INTERVALS, { 1: 60000, 2: 90000, 3: 120000 });
-  assert.equal(bis.MIN_INTERVAL_SECONDS, 60);
+  assert.equal(bis.MIN_INTERVAL_SECONDS, 12);
 
   const api = mockApi();
   const timers = {};
@@ -42,9 +42,7 @@ test("بيس ومحرك متبادلة الحجز ولا يعملان معًا �
 
   await bis(api, { threadID }, ["بيس", "رسالة بيس", "120"], 0, loadData, saveData, timers);
   assert.ok(timers[bisKey]);
-  assert.ok(String(api.sent.at(-1).message).startsWith(
-    "رسالة بيس\n\nبدء بيس رقم الجلسة [1]"
-  ));
+  assert.equal(String(api.sent.at(-1).message), "رسالة بيس");
 
   await engine(api, { threadID }, ["محرك", "1", "رسالة المحرك"], 0, loadData, saveData, timers);
   assert.equal(timers[engineKey], undefined);
@@ -55,9 +53,7 @@ test("بيس ومحرك متبادلة الحجز ولا يعملان معًا �
 
   await engine(api, { threadID }, ["محرك", "1", "رسالة المحرك"], 0, loadData, saveData, timers);
   assert.ok(timers[engineKey]);
-  assert.ok(String(api.sent.at(-1).message).startsWith(
-    "رسالة المحرك\n\nبدء محرك 1 رقم الجلسة [1]"
-  ));
+  assert.equal(String(api.sent.at(-1).message), "رسالة المحرك");
 
   await bis(api, { threadID }, ["بيس", "رسالة بيس", "120"], 0, loadData, saveData, timers);
   assert.equal(timers[bisKey], undefined);

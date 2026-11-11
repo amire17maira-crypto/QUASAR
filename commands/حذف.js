@@ -63,3 +63,5 @@ module.exports = async (
     return false;
   }
 };
+
+module.exports.aliases = ["delete", "unsend", "سحب", "حذف_رسالة"];

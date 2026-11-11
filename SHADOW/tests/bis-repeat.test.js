@@ -9,37 +9,59 @@ function mockApi() {
     sent,
     sendMessage(message, threadID, callback) {
       sent.push({ message, threadID });
-      if (typeof callback === "function") queueMicrotask(() => callback(null, { messageID: `m${sent.length}` }));
+      if (typeof callback === "function") {
+        queueMicrotask(() => callback(null, { messageID: `m${sent.length}` }));
+      }
     }
   };
 }
 
-test("بيس يرسل النص فوراً ويضبط التكرار بالثواني في المجموعة الحالية", async () => {
+test("بيس يرسل النص فقط ويحافظ على الأسطر ويضبط الفاصل", async () => {
   const api = mockApi();
   const timers = {};
-  await bis(api, { threadID: "g1" }, ["بيس", "صباح", "الخير", "120"], 0, () => ({ prefix: "!" }), () => {}, timers);
-  const state = timers[bis.stateKey("g1")];
-  assert.ok(state);
-  assert.equal(state.text, "صباح الخير");
-  assert.equal(state.intervalMs, 120000);
-  assert.equal(api.sent.length, 1, "بدء بيس يجب أن يرسل رسالة واحدة فقط");
-  assert.equal(api.sent[0].message, "صباح الخير\n\nبدء بيس رقم الجلسة [1]\nعدد الثواني: 120\nللإيقاف اكتب: بيس إيقاف");
-  bis.clearBis(timers, "g1");
+  const args = ["بيس", "صباح", "الخير", "120"];
+  args.rawText = "صباح\nالخير 120";
+
+  try {
+    await bis(api, { threadID: "bis-test-1" }, args, 0, () => ({ prefix: "!" }), () => {}, timers);
+    const state = timers[bis.stateKey("bis-test-1")];
+    assert.ok(state);
+    assert.equal(state.text, "صباح\nالخير");
+    assert.equal(state.intervalMs, 120000);
+    assert.equal(api.sent.length, 1);
+    assert.equal(api.sent[0].message, "صباح\nالخير");
+  } finally {
+    bis.clearBis(timers, "bis-test-1");
+  }
 });
 
-test("بيس يرفض الفاصل الأقصر من ستين ثانية ولا يبدأ مؤقتاً", async () => {
+test("بيس يرفض الفاصل الأقل من 12 ثانية", async () => {
   const api = mockApi();
   const timers = {};
-  await bis(api, { threadID: "g1" }, ["بيس", "رسالة", "30"], 0, () => ({ prefix: "!" }), () => {}, timers);
-  assert.equal(timers[bis.stateKey("g1")], undefined);
-  assert.match(String(api.sent[0].message), /أقل فاصل 60 ثانية/);
+  const args = ["بيس", "رسالة", "11"];
+  args.rawText = "رسالة 11";
+
+  try {
+    await bis(api, { threadID: "bis-test-2" }, args, 0, () => ({ prefix: "!" }), () => {}, timers);
+    assert.equal(timers[bis.stateKey("bis-test-2")], undefined);
+    assert.match(String(api.sent[0].message), /أقل فاصل 12 ثانية/);
+  } finally {
+    bis.clearBis(timers, "bis-test-2");
+  }
 });
 
 test("إيقاف بيس يزيل مؤقته في المجموعة الحالية", async () => {
   const api = mockApi();
   const timers = {};
-  await bis(api, { threadID: "g1" }, ["بيس", "رسالة", "60"], 0, () => ({ prefix: "!" }), () => {}, timers);
-  await bis(api, { threadID: "g1" }, ["بيس", "إيقاف"], 0, () => ({ prefix: "!" }), () => {}, timers);
-  assert.equal(timers[bis.stateKey("g1")], undefined);
-  assert.match(String(api.sent.at(-1).message), /تم إيقاف بيس/);
+  const args = ["بيس", "رسالة", "60"];
+  args.rawText = "رسالة 60";
+
+  try {
+    await bis(api, { threadID: "bis-test-3" }, args, 0, () => ({ prefix: "!" }), () => {}, timers);
+    await bis(api, { threadID: "bis-test-3" }, ["بيس", "إيقاف"], 0, () => ({ prefix: "!" }), () => {}, timers);
+    assert.equal(timers[bis.stateKey("bis-test-3")], undefined);
+    assert.match(String(api.sent.at(-1).message), /تم إيقاف بيس/);
+  } finally {
+    bis.clearBis(timers, "bis-test-3");
+  }
 });
