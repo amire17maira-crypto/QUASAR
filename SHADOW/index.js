@@ -537,6 +537,7 @@ ws3.login({ appState }, (err, api) => {
       return;
     }
     if (!event) return;
+
     reportedOnline = true;
     sessionErrorLogged = false;
 
@@ -570,7 +571,14 @@ ws3.login({ appState }, (err, api) => {
       }
     } else {
       for (const e in events) {
-        try { events[e](api, event, config, loadData, saveData, automicTimers, BOT_ID, startTime); } catch {}
+        try {
+          events[e](api, event, config, loadData, saveData, automicTimers, BOT_ID, startTime);
+        } catch (eventError) {
+          console.log(
+            `SHADOW EVENT HANDLER ERROR [${e}]:`,
+            eventError?.message || eventError
+          );
+        }
       }
     }
 

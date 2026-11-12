@@ -17,6 +17,7 @@ function deleteAfterSixSeconds(api, sent) {
 
 const DELAY = 1800;
 const INTERVAL = 3000;
+const CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 
 function setNicknameAsync(api, nickname, threadID, userID) {
   const method = [api.nickname, api.changeNickname, api.setNickname].find(fn => typeof fn === "function");
@@ -105,6 +106,9 @@ module.exports = async (api, event, args, startTime, loadData, saveData, automic
   if (!data.nicknameProtections || typeof data.nicknameProtections !== "object" || Array.isArray(data.nicknameProtections)) {
     data.nicknameProtections = {};
   }
+  if (!data.nicknameMemberCache || typeof data.nicknameMemberCache !== "object" || Array.isArray(data.nicknameMemberCache)) {
+    data.nicknameMemberCache = {};
+  }
 
   const action = String(args[1] || "").trim().toLowerCase();
   const key = timerKey(threadID);
@@ -146,16 +150,55 @@ module.exports = async (api, event, args, startTime, loadData, saveData, automic
     );
   }
 
-  let info;
+  let members;
   try {
-    info = await getThreadInfoSafe(api, threadID);
+    const info = await getThreadInfoSafe(api, threadID);
+    const participantIDs = Array.isArray(info?.participantIDs)
+      ? [...new Set(info.participantIDs.map(uid => String(uid || "")).filter(Boolean))]
+      : [];
+
+    if (!participantIDs.length) {
+      throw new Error("قائمة أعضاء المجموعة فارغة أو غير صالحة");
+    }
+
+    data.nicknameMemberCache[threadID] = {
+      participantIDs,
+      savedAt: Date.now()
+    };
+    saveData(data);
+
+    const skip = getSkipped(config, BOT_ID);
+    members = participantIDs.filter(uid => !skip.has(uid));
+
+    console.log(`[NICKNAME CACHE] Fresh member list saved for ${threadID}: ${participantIDs.length}`);
   } catch (e) {
     console.error("NIK_GET_THREAD_INFO_ERROR:", e && (e.stack || e.message || e));
-    return api.sendMessage("❌ تعذر الحصول على قائمة أعضاء المجموعة. راجع سجل تشغيل البوت لمعرفة السبب.", threadID);
-  }
 
-  const skip = getSkipped(config, BOT_ID);
-  const members = (info.participantIDs || []).filter(uid => !skip.has(String(uid)));
+    const cached = data.nicknameMemberCache[threadID];
+    const age = Date.now() - Number(cached?.savedAt);
+    const cachedIDs = Array.isArray(cached?.participantIDs)
+      ? [...new Set(cached.participantIDs.map(uid => String(uid || "")).filter(Boolean))]
+      : [];
+
+    if (
+      cachedIDs.length > 0 &&
+      Number.isFinite(age) &&
+      age >= 0 &&
+      age <= CACHE_MAX_AGE_MS
+    ) {
+      const skip = getSkipped(config, BOT_ID);
+      members = cachedIDs.filter(uid => !skip.has(uid));
+
+      console.log(
+        `[NICKNAME CACHE] Using saved member list for ${threadID}; age: ${Math.round(age / 1000)} seconds`
+      );
+    } else {
+      return api.sendMessage(
+        "❌ تعذرت قراءة أعضاء المجموعة، ولا توجد قائمة احتياطية حديثة وموثوقة (آخر 10 دقائق).\nانتظر حتى تنتهي مهلة Facebook ثم أعد المحاولة.",
+        threadID
+      );
+    }
+  }
 
   data.nicknameProtections[threadID] = nickname;
   saveData(data);

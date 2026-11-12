@@ -2,6 +2,7 @@
 
 const cooldowns = Object.create(null);
 const nickCooldowns = Object.create(null);
+const savedNameEventCooldowns = Object.create(null);
 
 function setNickname(api, nickname, threadID, userID) {
   const method = [api.nickname, api.changeNickname, api.setNickname]
@@ -80,6 +81,38 @@ module.exports = (api, event, config, loadData, saveData, automicTimers, BOT_ID)
         setTimeout(() => setNickname(api, groupNickname, threadID, targetID)
           .catch(error => console.log("تعذر استعادة كنية العضو المحمية:", error.message)), 1200);
       }
+      return;
+    }
+  }
+
+  // استعادة اسم المجموعة المحفوظ فور وصول حدث MQTT.
+  if (event.logMessageType === "log:thread-name") {
+    const wantedName = data.savedGroupNames?.[threadID];
+
+    if (typeof wantedName === "string" && wantedName.trim()) {
+      const newName = event.logMessageData?.name;
+
+      if (
+        changerID !== botID &&
+        !developerIDs.has(changerID) &&
+        typeof newName === "string" &&
+        newName !== wantedName
+      ) {
+        const now = Date.now();
+        const lastAttempt = savedNameEventCooldowns[threadID] || 0;
+
+        if (now - lastAttempt >= 4000) {
+          savedNameEventCooldowns[threadID] = now;
+
+          Promise.resolve()
+            .then(() => api.gcname(wantedName, threadID))
+            .catch(error => {
+              console.log("تعذر استعادة اسم المجموعة المحفوظ فورًا:", error.message || error);
+            });
+        }
+      }
+
+      // منع الحماية القديمة من إرسال طلب استرجاع ثانٍ لهذا الحدث.
       return;
     }
   }
