@@ -5,14 +5,14 @@ const os = require("os");
 const path = require("path");
 const { Jimp, loadFont } = require("jimp");
 
-const WIDTH = 1200;
-const HEIGHT = 820;
+const WIDTH = 1400;
+const HEIGHT = 1000;
 
-const COLORS = {
-  background: 0x0a1020ff,
-  panel: 0x121d31ff,
-  panel2: 0x17253cff,
-  border: 0x263a55ff,
+const C = {
+  bg: 0x080e1aff,
+  panel: 0x111c30ff,
+  panel2: 0x172640ff,
+  border: 0x293e5cff,
   white: 0xeaf3ffff,
   muted: 0x91a6c1ff,
   cyan: 0x45d6eaff,
@@ -22,180 +22,221 @@ const COLORS = {
   track: 0x26364dff
 };
 
-function formatBytes(bytes) {
-  if (!Number.isFinite(bytes) || bytes < 0) return "N/A";
-  if (bytes < 1024) return `${bytes} B`;
-
+function formatBytes(n) {
+  if (!Number.isFinite(n) || n < 0) return "N/A";
+  if (n < 1024) return `${n} B`;
   const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let index = 0;
+  let v = n / 1024, i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(2)} ${units[i]}`;
+}
 
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024;
-    index++;
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "N/A";
+  let s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  s %= 86400;
+  const h = Math.floor(s / 3600);
+  s %= 3600;
+  const m = Math.floor(s / 60);
+  s %= 60;
+  return `${d}d ${h}h ${m}m ${s}s`;
+}
+
+function readNumber(file) {
+  try {
+    const value = fs.readFileSync(file, "utf8").trim();
+    if (!value || value === "max") return null;
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function getMemory() {
+  const totalHost = os.totalmem();
+  const freeHost = os.freemem();
+
+  const cgroupTotal =
+    readNumber("/sys/fs/cgroup/memory.max") ??
+    readNumber("/sys/fs/cgroup/memory/memory.limit_in_bytes");
+
+  const cgroupUsed =
+    readNumber("/sys/fs/cgroup/memory.current") ??
+    readNumber("/sys/fs/cgroup/memory/memory.usage_in_bytes");
+
+  if (cgroupTotal && cgroupUsed !== null &&
+      cgroupTotal < 1e15 && cgroupUsed <= cgroupTotal) {
+    return {
+      total: cgroupTotal,
+      used: cgroupUsed,
+      free: Math.max(0, cgroupTotal - cgroupUsed),
+      percent: cgroupTotal
+        ? Math.round(cgroupUsed / cgroupTotal * 100)
+        : null,
+      source: "CONTAINER LIMIT"
+    };
   }
 
-  return `${value.toFixed(1)} ${units[index]}`;
+  return {
+    total: totalHost,
+    used: Math.max(0, totalHost - freeHost),
+    free: freeHost,
+    percent: totalHost
+      ? Math.round((totalHost - freeHost) / totalHost * 100)
+      : null,
+    source: "HOST OS"
+  };
 }
 
-function formatDuration(milliseconds) {
-  if (!Number.isFinite(milliseconds) || milliseconds < 0) return "N/A";
-
-  let seconds = Math.floor(milliseconds / 1000);
-  const days = Math.floor(seconds / 86400);
-  seconds %= 86400;
-
-  const hours = Math.floor(seconds / 3600);
-  seconds %= 3600;
-
-  const minutes = Math.floor(seconds / 60);
-  seconds %= 60;
-
-  return `${days}d  ${hours}h  ${minutes}m  ${seconds}s`;
-}
-
-function directorySize(directory) {
+function directorySize(root) {
   let total = 0;
-
-  const excludedDirectories = new Set([
-    "node_modules",
-    ".git",
-    ".cache"
-  ]);
-
+  const excludedDirs = new Set(["node_modules", ".git", ".cache"]);
   const excludedFiles = new Set([
-    "config.json",
-    "fca-config.json",
-    ".env"
+    "config.json", "fca-config.json", ".env"
   ]);
 
-  function walk(current) {
+  function walk(dir) {
     let entries;
-
     try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch (_) {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
       return;
     }
 
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue;
-
-      const fullPath = path.join(current, entry.name);
+      const full = path.join(dir, entry.name);
 
       if (entry.isDirectory()) {
-        if (excludedDirectories.has(entry.name)) continue;
-        walk(fullPath);
-        continue;
+        if (!excludedDirs.has(entry.name)) walk(full);
+      } else if (entry.isFile()) {
+        if (excludedFiles.has(entry.name)) continue;
+        if (/^appState.*\.json$/i.test(entry.name)) continue;
+        if (/\.(zip|tar\.gz)$/i.test(entry.name)) continue;
+        try {
+          total += fs.statSync(full).size;
+        } catch {}
       }
-
-      if (!entry.isFile()) continue;
-      if (excludedFiles.has(entry.name)) continue;
-      if (/^appState.*\.json$/i.test(entry.name)) continue;
-      if (/\.(tar\.gz|zip)$/i.test(entry.name)) continue;
-
-      try {
-        total += fs.statSync(fullPath).size;
-      } catch (_) {}
     }
   }
 
-  walk(directory);
+  walk(root);
   return total;
 }
 
-function getPanelStatus(statusFile) {
+function getPanelStatus(file) {
   try {
-    const status = JSON.parse(fs.readFileSync(statusFile, "utf8"));
-    const startedAt = Date.parse(status.startedAt);
-    const pid = Number(status.pid);
+    const data = JSON.parse(fs.readFileSync(file, "utf8"));
+    const start = Date.parse(data.startedAt);
+    const pid = Number(data.pid);
 
-    if (!Number.isFinite(startedAt) || startedAt <= 0) {
-      return { online: false, uptime: "N/A", startedAt: "N/A" };
-    }
-
-    if (!Number.isInteger(pid) || pid <= 0) {
-      return { online: false, uptime: "N/A", startedAt: "N/A" };
+    if (!Number.isFinite(start) || start <= 0 ||
+        !Number.isInteger(pid) || pid <= 0) {
+      throw new Error("Invalid panel status");
     }
 
     try {
       process.kill(pid, 0);
-    } catch (error) {
-      if (error.code !== "EPERM") {
-        return { online: false, uptime: "N/A", startedAt: "N/A" };
-      }
+    } catch (e) {
+      if (e.code !== "EPERM") throw e;
     }
 
     return {
       online: true,
-      uptime: formatDuration(Math.max(0, Date.now() - startedAt)),
-      startedAt: new Date(startedAt).toISOString().replace("T", " ").slice(0, 19) + " UTC"
+      uptime: formatDuration(Date.now() - start),
+      startedAt: new Date(start).toISOString().replace("T", " ").slice(0, 19) + " UTC"
     };
-  } catch (_) {
-    return { online: false, uptime: "N/A", startedAt: "N/A" };
+  } catch {
+    return {
+      online: false,
+      uptime: "N/A",
+      startedAt: "N/A"
+    };
+  }
+}
+
+function getHosting() {
+  const e = process.env;
+  const railway =
+    e.RAILWAY_PROJECT_ID ||
+    e.RAILWAY_SERVICE_ID ||
+    e.RAILWAY_DEPLOYMENT_ID;
+
+  if (railway) {
+    return {
+      provider: "RAILWAY",
+      environment: e.RAILWAY_ENVIRONMENT_NAME || "N/A",
+      service: e.RAILWAY_SERVICE_NAME || "N/A"
+    };
+  }
+
+  if (e.RENDER) return { provider: "RENDER", environment: "N/A", service: "N/A" };
+  if (e.HEROKU_APP_NAME) return { provider: "HEROKU", environment: "N/A", service: e.HEROKU_APP_NAME };
+  if (e.VERCEL) return { provider: "VERCEL", environment: "N/A", service: "N/A" };
+  if (e.PREFIX && String(e.PREFIX).includes("com.termux")) {
+    return { provider: "TERMUX", environment: "ANDROID", service: "LOCAL DEVICE" };
+  }
+
+  return {
+    provider: "NOT DETECTED",
+    environment: process.platform.toUpperCase(),
+    service: "N/A"
+  };
+}
+
+function getStorage(dir) {
+  try {
+    const s = fs.statfsSync(dir);
+    const total = Number(s.blocks) * Number(s.bsize);
+    const free = Number(s.bavail) * Number(s.bsize);
+
+    if (!Number.isFinite(total) || total <= 0 ||
+        !Number.isFinite(free) || free < 0) throw new Error();
+
+    const used = Math.max(0, total - free);
+    return {
+      total, free, used,
+      percent: Math.round(used / total * 100)
+    };
+  } catch {
+    return { total: null, free: null, used: null, percent: null };
   }
 }
 
 function getSystemMetrics(dataDir, projectDir, statusFile) {
-  const totalRam = os.totalmem();
-  const freeRam = os.freemem();
-  const usedRam = Math.max(0, totalRam - freeRam);
-
-  let storage = {
-    total: null,
-    used: null,
-    free: null,
-    percent: null
-  };
-
-  try {
-    const stat = fs.statfsSync(dataDir);
-    const blockSize = Number(stat.bsize);
-    const total = Number(stat.blocks) * blockSize;
-    const free = Number(stat.bavail) * blockSize;
-
-    if (Number.isFinite(total) && total > 0 && Number.isFinite(free)) {
-      storage = {
-        total,
-        used: Math.max(0, total - free),
-        free,
-        percent: Math.round(((total - free) / total) * 100)
-      };
-    }
-  } catch (_) {}
-
-  const android = process.platform === "android" ||
-    String(process.env.PREFIX || "").includes("com.termux");
-
-  const cpus = os.cpus();
+  const memory = getMemory();
+  const hosting = getHosting();
+  const cpus = os.cpus() || [];
   const load = os.loadavg();
 
   return {
+    generated: new Date().toISOString(),
     panel: getPanelStatus(statusFile),
-    ram: {
-      total: totalRam,
-      used: usedRam,
-      free: freeRam,
-      percent: totalRam > 0 ? Math.round((usedRam / totalRam) * 100) : null
-    },
-    storage,
+    ram: memory,
+    storage: getStorage(projectDir),
     projectSize: directorySize(projectDir),
-    hosting: android ? "TERMUX / ANDROID" :
-      process.platform === "linux" ? "LINUX HOST" : process.platform.toUpperCase(),
-    provider: "Not detected",
+    hosting,
     os: `${os.type()} ${os.release()}`,
     architecture: process.arch.toUpperCase(),
     node: process.version,
-    hostname: os.hostname() || "N/A",
-    cpu: cpus.length ? `${cpus.length} cores` : "N/A",
-    load: load.every(Number.isFinite) ? load.map(v => v.toFixed(2)).join(" / ") : "N/A"
+    cpu: cpus.length ? `${cpus.length} CORES` : "N/A",
+    cpuModel: cpus[0]?.model || "N/A",
+    load: load.every(Number.isFinite)
+      ? load.map(x => x.toFixed(2)).join(" / ")
+      : "N/A",
+    pid: String(process.pid),
+    dataDir: path.basename(dataDir)
   };
 }
 
-function rect(image, x, y, width, height, color) {
-  const x2 = Math.min(WIDTH, x + width);
-  const y2 = Math.min(HEIGHT, y + height);
-
+function rect(image, x, y, w, h, color) {
+  const x2 = Math.min(WIDTH, x + w);
+  const y2 = Math.min(HEIGHT, y + h);
   for (let py = Math.max(0, y); py < y2; py++) {
     for (let px = Math.max(0, x); px < x2; px++) {
       image.setPixelColor(color, px, py);
@@ -203,113 +244,116 @@ function rect(image, x, y, width, height, color) {
   }
 }
 
-function text(image, font, value, x, y, maxWidth = 500) {
-  image.print({
-    font,
-    x,
-    y,
-    text: String(value),
-    maxWidth
-  });
+function txt(image, font, value, x, y, maxWidth = 500) {
+  image.print({ font, x, y, text: String(value), maxWidth });
 }
 
-function progressBar(image, x, y, width, percent, color) {
-  rect(image, x, y, width, 12, COLORS.track);
-
+function bar(image, x, y, width, percent, color) {
+  rect(image, x, y, width, 10, C.track);
   if (Number.isFinite(percent)) {
-    const filled = Math.max(0, Math.min(width, Math.round(width * percent / 100)));
-    if (filled > 0) rect(image, x, y, filled, 12, color);
+    const w = Math.max(0, Math.min(width, width * percent / 100));
+    if (w > 0) rect(image, x, y, w, 10, color);
   }
 }
 
 async function createSessionCard(options = {}) {
-  const dataDir = path.resolve(options.dataDir || path.resolve(__dirname, ".."));
-  const projectDir = path.resolve(options.projectDir || path.resolve(__dirname, ".."));
+  const projectDir = path.resolve(
+    options.projectDir || path.resolve(__dirname, "..")
+  );
+  const dataDir = path.resolve(
+    options.dataDir || projectDir
+  );
   const statusFile = path.join(dataDir, "panel-status.json");
-
-  const metrics = getSystemMetrics(dataDir, projectDir, statusFile);
+  const m = getSystemMetrics(dataDir, projectDir, statusFile);
 
   const fontRoot = path.resolve(
     path.dirname(require.resolve("@jimp/plugin-print")),
     "../fonts/open-sans"
   );
 
-  const font = async (size, color) => {
-    const fontPath = path.join(
-      fontRoot,
-      `open-sans-${size}-${color}`,
-      `open-sans-${size}-${color}.fnt`
-    );
-    if (!fs.existsSync(fontPath)) {
-      throw new Error(`Font file not found: ${fontPath}`);
-    }
-    return loadFont(fontPath);
-  };
+  async function font(size) {
+    const name = `open-sans-${size}-white`;
+    const file = path.join(fontRoot, name, `${name}.fnt`);
+    if (!fs.existsSync(file)) throw new Error(`Missing font: ${file}`);
+    return loadFont(file);
+  }
 
-  const [f12, f16, f32, f64] = await Promise.all([
-    font(8, "white"),
-    font(16, "white"),
-    font(32, "white"),
-    font(64, "white")
+  const [f8, f16, f32, f64] = await Promise.all([
+    font(8), font(16), font(32), font(64)
   ]);
 
   const image = new Jimp({
     width: WIDTH,
     height: HEIGHT,
-    color: COLORS.background
+    color: C.bg
   });
 
   // Header
-  rect(image, 0, 0, WIDTH, 7, COLORS.cyan);
-  text(image, f64, "QUASAR", 48, 35, 400);
-  text(image, f16, "SYSTEM OVERVIEW  /  HOSTING DASHBOARD", 52, 112, 700);
-  text(image, f12, `GENERATED ${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC`, 800, 64, 350);
-  rect(image, 48, 155, 1104, 2, COLORS.border);
+  rect(image, 0, 0, WIDTH, 7, C.cyan);
+  txt(image, f64, "QUASAR", 48, 30, 450);
+  txt(image, f16, "SYSTEM MONITORING CENTER", 55, 108, 650);
+  txt(image, f8, `LIVE SNAPSHOT  /  ${m.generated}`, 870, 65, 470);
+  rect(image, 48, 150, 1304, 2, C.border);
 
   // Panel status
-  rect(image, 48, 180, 1104, 125, COLORS.panel);
-  rect(image, 48, 180, 6, 125, metrics.panel.online ? COLORS.green : COLORS.red);
-  text(image, f12, "PANEL STATUS", 76, 199, 250);
-  text(image, f32, metrics.panel.online ? "ONLINE" : "OFFLINE", 76, 230, 350);
-  text(image, f12, "PANEL UPTIME", 470, 199, 250);
-  text(image, f32, metrics.panel.uptime, 470, 230, 500);
-  text(image, f12, `STARTED: ${metrics.panel.startedAt}`, 850, 240, 270);
+  rect(image, 48, 175, 1304, 145, C.panel);
+  rect(image, 48, 175, 7, 145, m.panel.online ? C.green : C.red);
+  txt(image, f8, "PANEL STATUS", 78, 194, 300);
+  txt(image, f32, m.panel.online ? "ONLINE" : "OFFLINE", 78, 225, 350);
+  txt(image, f8, "PANEL UPTIME", 510, 194, 300);
+  txt(image, f32, m.panel.uptime, 510, 225, 550);
+  txt(image, f8, `STARTED: ${m.panel.startedAt}`, 78, 285, 700);
+  txt(image, f8, `PROCESS ID: ${m.pid}`, 950, 285, 300);
 
-  // RAM card
-  rect(image, 48, 330, 530, 180, COLORS.panel);
-  text(image, f16, "SYSTEM MEMORY", 76, 352, 400);
-  text(image, f32, formatBytes(metrics.ram.used), 76, 392, 300);
-  text(image, f12, `USED / ${formatBytes(metrics.ram.total)} TOTAL`, 78, 440, 400);
-  progressBar(image, 78, 475, 450, metrics.ram.percent, COLORS.cyan);
-  text(image, f12, `FREE: ${formatBytes(metrics.ram.free)}   ${metrics.ram.percent ?? "N/A"}% USED`, 78, 485, 450);
+  // Memory
+  rect(image, 48, 345, 630, 205, C.panel);
+  txt(image, f16, "MEMORY MONITOR", 78, 365, 450);
+  txt(image, f32, formatBytes(m.ram.used), 78, 405, 350);
+  txt(image, f8, `USED / ${formatBytes(m.ram.total)} TOTAL`, 80, 455, 500);
+  bar(image, 80, 485, 550, m.ram.percent, C.cyan);
+  txt(image, f8, `FREE: ${formatBytes(m.ram.free)}  |  ${m.ram.percent ?? "N/A"}%`, 80, 510, 540);
+  txt(image, f8, `SOURCE: ${m.ram.source}`, 80, 530, 500);
 
-  // Storage card
-  rect(image, 622, 330, 530, 180, COLORS.panel);
-  text(image, f16, "DEVICE STORAGE", 650, 352, 400);
-  text(image, f32, formatBytes(metrics.storage.used), 650, 392, 300);
-  text(image, f12, `USED / ${formatBytes(metrics.storage.total)} TOTAL`, 652, 440, 400);
-  progressBar(image, 652, 475, 450, metrics.storage.percent, COLORS.green);
-  text(image, f12, `FREE: ${formatBytes(metrics.storage.free)}   ${metrics.storage.percent ?? "N/A"}% USED`, 652, 485, 450);
+  // Storage
+  rect(image, 722, 345, 630, 205, C.panel);
+  txt(image, f16, "STORAGE MONITOR", 752, 365, 450);
+  txt(image, f32, formatBytes(m.storage.used), 752, 405, 350);
+  txt(image, f8, `USED / ${formatBytes(m.storage.total)} TOTAL`, 754, 455, 500);
+  bar(image, 754, 485, 550, m.storage.percent, C.green);
+  txt(image, f8, `FREE: ${formatBytes(m.storage.free)}  |  ${m.storage.percent ?? "N/A"}%`, 754, 510, 540);
 
   // Project and hosting
-  rect(image, 48, 535, 530, 115, COLORS.panel);
-  text(image, f16, "PROJECT FOOTPRINT", 76, 555, 400);
-  text(image, f32, formatBytes(metrics.projectSize), 76, 590, 400);
-  text(image, f12, "SOURCE FILES (EXCLUDES DEPENDENCIES / SECRETS)", 78, 630, 460);
+  rect(image, 48, 575, 405, 150, C.panel);
+  txt(image, f16, "PROJECT FOOTPRINT", 75, 595, 350);
+  txt(image, f32, formatBytes(m.projectSize), 75, 635, 320);
+  txt(image, f8, "SOURCE FILES EXCLUDING DEPENDENCIES", 77, 690, 350);
 
-  rect(image, 622, 535, 530, 115, COLORS.panel);
-  text(image, f16, "HOSTING ENVIRONMENT", 650, 555, 400);
-  text(image, f32, metrics.hosting, 650, 590, 450);
-  text(image, f12, `PROVIDER: ${metrics.provider}`, 652, 630, 450);
+  rect(image, 475, 575, 405, 150, C.panel);
+  txt(image, f16, "HOSTING PROVIDER", 502, 595, 350);
+  txt(image, f32, m.hosting.provider, 502, 635, 350);
+  txt(image, f8, `ENV: ${m.hosting.environment}`, 504, 690, 350);
+
+  rect(image, 902, 575, 450, 150, C.panel);
+  txt(image, f16, "SERVICE", 929, 595, 350);
+  txt(image, f32, m.hosting.service, 929, 635, 390);
+  txt(image, f8, `NODE PROCESS: ${m.pid}`, 931, 690, 350);
 
   // System details
-  rect(image, 48, 675, 1104, 100, COLORS.panel2);
-  text(image, f12, "SYSTEM", 76, 692, 200);
-  text(image, f16, metrics.os, 76, 716, 450);
-  text(image, f12, "RUNTIME", 460, 692, 200);
-  text(image, f16, `${metrics.node}  /  ${metrics.architecture}`, 460, 716, 400);
-  text(image, f12, "CPU / LOAD", 850, 692, 200);
-  text(image, f12, `${metrics.cpu}  /  ${metrics.load}`, 850, 720, 280);
+  rect(image, 48, 750, 1304, 175, C.panel2);
+  txt(image, f16, "SYSTEM INFORMATION", 76, 770, 500);
+  txt(image, f8, `OS: ${m.os}`, 78, 815, 600);
+  txt(image, f8, `ARCH: ${m.architecture}`, 78, 850, 500);
+  txt(image, f8, `NODE: ${m.node}`, 78, 885, 500);
+
+  txt(image, f8, "CPU INFORMATION", 720, 770, 350);
+  txt(image, f8, `CORES: ${m.cpu}`, 722, 815, 500);
+  txt(image, f8, `MODEL: ${m.cpuModel}`, 722, 850, 600);
+  txt(image, f8, `LOAD: ${m.load}`, 722, 885, 500);
+
+  // Footer
+  rect(image, 48, 950, 1304, 2, C.border);
+  txt(image, f8, "QUASAR MONITOR  /  VALUES READ FROM CURRENT RUNTIME", 50, 965, 900);
+  txt(image, f8, "AUTO GENERATED PNG", 1120, 965, 230);
 
   return image.getBuffer("image/png");
 }

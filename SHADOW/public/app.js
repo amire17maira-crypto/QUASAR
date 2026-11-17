@@ -31,6 +31,7 @@ async function loadDashboard(){
   const sessionNick = await api(sessionApi("nickname"));
   $("botNickname").value=sessionNick.nickname || "";
   $("developerNickname").value=state.developerNickname||"𝙻𝚘𝚛𝚍 𝚂𝚑𝚊𝚍𝚘𝚠⦓ ⚛️ ⦔";
+  $("developerNicknameGuard").checked=state.developerNicknameGuardEnabled!==false;
   $("nicknameGuard").checked=sessionNick.enabled;
   $("nicknameStatus").textContent=sessionNick.enabled!==false
     ?"الاسترجاع التلقائي مفعّل • الفحص كل 7 ثوانٍ"
@@ -215,7 +216,7 @@ $("developerForm").addEventListener("submit",async e=>{
   e.preventDefault();
   try {
     const ids = [$("developerId").value.trim(), $("developerId2").value.trim()].filter(Boolean);
-    const r = await api("/api/developer", {
+    const r = await api(sessionApi("developer"), {
       method:"PUT",
       body:JSON.stringify({ids})
     });
@@ -254,9 +255,12 @@ $("developerNicknameForm").addEventListener("submit", async e => {
     return;
   }
   try {
-    const r = await api("/api/developer-nickname", {
+    const r = await api(sessionApi("developer-nickname"), {
       method: "PUT",
-      body: JSON.stringify({ nickname: $("developerNickname").value.trim() })
+      body: JSON.stringify({
+        nickname: $("developerNickname").value.trim(),
+        enabled: $("developerNicknameGuard").checked
+      })
     });
     notify($("developerNicknameMsg"), r.message);
     await loadDashboard();

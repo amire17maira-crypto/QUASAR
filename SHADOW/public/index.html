@@ -167,7 +167,12 @@
         <form id="developerNicknameForm">
           <label for="developerNickname">كنية المطور</label>
           <input id="developerNickname" maxlength="80" placeholder="اكتب كنية المطور هنا" required>
-          <p class="muted">تستخدم الحماية الدورية الحالية نفسها المفعّلة من صفحة كنية البوت.</p>
+          <label class="switch-row">
+            <span>تشغيل الاسترجاع التلقائي</span>
+            <input id="developerNicknameGuard" type="checkbox">
+            <i></i>
+          </label>
+          <p class="muted">عند التشغيل، يفحص كنية المطور كل 7 ثوانٍ ويحاول استرجاعها إذا تغيرت.</p>
           <button class="primary">حفظ كنية المطور</button>
         </form>
         <p id="developerNicknameMsg" class="muted"></p>

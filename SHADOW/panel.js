@@ -250,6 +250,72 @@ app.put("/api/developer", auth, (req, res) => {
   writeJsonAtomic(CONFIG_FILE, config);
   res.json({ ok: true, message: "تم حفظ معرفات المطورين. أعد تشغيل البوت لتطبيقها." });
 });
+app.put("/api/sessions/:id/developer", auth, (req, res) => {
+  const id = validSession(req, res);
+  if (!id) return;
+
+  const ids = Array.isArray(req.body?.ids)
+    ? req.body.ids.map(x => String(x).trim()).filter(Boolean)
+    : [String(req.body?.id || "").trim()].filter(Boolean);
+
+  if (
+    ids.length < 1 ||
+    ids.length > 2 ||
+    ids.some(value => !/^[0-9]{5,25}$/.test(value)) ||
+    new Set(ids).size !== ids.length
+  ) {
+    return res.status(400).json({
+      error: "أدخل معرفاً أو معرفين صحيحين من 5 إلى 25 رقماً"
+    });
+  }
+
+  const config = readJson(CONFIG_FILE, {});
+  config.SESSIONS = config.SESSIONS && typeof config.SESSIONS === "object"
+    ? config.SESSIONS : {};
+  config.SESSIONS[id] = config.SESSIONS[id] && typeof config.SESSIONS[id] === "object"
+    ? config.SESSIONS[id] : {};
+
+  config.SESSIONS[id].DEV_ID = ids[0];
+  config.SESSIONS[id].DEV_IDS = ids;
+
+  writeJsonAtomic(CONFIG_FILE, config);
+  res.json({
+    ok: true,
+    message: "تم حفظ مطوري الجلسة. أعد تشغيل البوت لتطبيق المعرفات."
+  });
+});
+
+app.put("/api/sessions/:id/developer-nickname", auth, (req, res) => {
+  const id = validSession(req, res);
+  if (!id) return;
+
+  const nickname = String(req.body?.nickname || "").trim();
+  if (!nickname || nickname.length > 80) {
+    return res.status(400).json({
+      error: "كنية المطور مطلوبة ويجب ألا تتجاوز 80 حرفاً"
+    });
+  }
+
+  if (typeof req.body?.enabled !== "boolean") {
+    return res.status(400).json({ error: "حالة الاسترجاع غير صالحة" });
+  }
+
+  const config = readJson(CONFIG_FILE, {});
+  config.SESSIONS = config.SESSIONS && typeof config.SESSIONS === "object"
+    ? config.SESSIONS : {};
+  config.SESSIONS[id] = config.SESSIONS[id] && typeof config.SESSIONS[id] === "object"
+    ? config.SESSIONS[id] : {};
+
+  config.SESSIONS[id].DEV_NICK = nickname;
+  config.SESSIONS[id].DEV_NICK_GUARD_ENABLED = req.body.enabled;
+
+  writeJsonAtomic(CONFIG_FILE, config);
+  res.json({
+    ok: true,
+    message: "تم حفظ كنية المطور وإعداد الاسترجاع الخاص بهذه الجلسة."
+  });
+});
+
 app.get("/api/sessions/:id/nickname", auth, (req, res) => {
   const id = String(req.params.id);
   if (!/^[123]$/.test(id)) return res.status(400).json({ error: "رقم الجلسة غير صالح" });
@@ -518,10 +584,20 @@ app.get("/api/sessions/:id/dashboard", auth, (req, res) => {
       botId: processInfo.botId || status.botId || null
     },
     prefix: data.prefix || "!",
-    developerIds: Array.isArray(botConfig.DEV_IDS) ? botConfig.DEV_IDS : [String(botConfig.DEV_ID || "")],
+    developerIds: Array.isArray(session.DEV_IDS)
+      ? session.DEV_IDS
+      : session.DEV_ID
+        ? [String(session.DEV_ID)]
+        : id === "1"
+          ? (Array.isArray(botConfig.DEV_IDS) ? botConfig.DEV_IDS : [String(botConfig.DEV_ID || "")].filter(Boolean))
+          : [],
     botNickname: String(session.BOT_NICK || botConfig.BOT_NICK || "𝚀𝚄𝙰𝚂𝙰𝚁 ⦓ ⚛️ ⦔"),
     nicknameGuardEnabled: (session.NICK_GUARD_ENABLED ?? botConfig.NICK_GUARD_ENABLED) !== false,
-    developerNickname: String(botConfig.DEV_NICK || "𝚂𝙷𝙰𝙳𝙾𝚆 ⦓ ⚛️ ⦔"),
+    developerNickname: String(session.DEV_NICK || (id === "1" ? botConfig.DEV_NICK : "") || "𝚂𝙷𝙰𝙳𝙾𝚆 ⦓ ⚛️ ⦔"),
+    developerNicknameGuardEnabled: (
+      session.DEV_NICK_GUARD_ENABLED ??
+      (id === "1" ? botConfig.DEV_NICK_GUARD_ENABLED : undefined)
+    ) !== false,
     freePrefix: !!data.freePrefix,
     admins: Array.isArray(data.admins) ? data.admins : [],
     commands,

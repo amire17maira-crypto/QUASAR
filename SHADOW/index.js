@@ -31,18 +31,59 @@ const PORT = Number(process.env.SHADOW_BOT_PORT || process.env.PORT || (SESSION_
 const sessionConfig = savedConfig.SESSIONS?.[SESSION_ID] || {};
 const environmentDevIds = String(process.env.DEV_IDS || "")
   .split(",").map(value => value.trim()).filter(value => /^[0-9]{5,25}$/.test(value));
-const DEV_ID = String(process.env.DEV_ID || savedConfig.DEV_ID || environmentDevIds[0] || "");
-const configuredDevIds = Array.isArray(savedConfig.DEV_IDS)
-  ? savedConfig.DEV_IDS.map(String).filter(x => /^[0-9]{5,25}$/.test(x)).slice(0, 10)
-  : [];
-const DEV_IDS = [...new Set([DEV_ID, ...configuredDevIds, ...environmentDevIds].filter(x => /^[0-9]{5,25}$/.test(x)))];
+
+function getSessionDeveloperSettings(sourceConfig = {}) {
+  const session = sourceConfig.SESSIONS?.[SESSION_ID] || {};
+  let rawIds = [];
+
+  if (Array.isArray(session.DEV_IDS)) {
+    rawIds = session.DEV_IDS;
+  } else if (session.DEV_ID) {
+    rawIds = [session.DEV_ID];
+  } else if (SESSION_ID === "1") {
+    rawIds = [
+      ...(Array.isArray(sourceConfig.DEV_IDS) ? sourceConfig.DEV_IDS : []),
+      sourceConfig.DEV_ID,
+      process.env.DEV_ID,
+      ...environmentDevIds
+    ];
+  }
+
+  const ids = [...new Set(rawIds.map(String)
+    .map(value => value.trim())
+    .filter(value => /^[0-9]{5,25}$/.test(value)))].slice(0, 50);
+
+  const preferredId = String(
+    session.DEV_ID ||
+    (SESSION_ID === "1" ? sourceConfig.DEV_ID || process.env.DEV_ID || "" : "") ||
+    ids[0] || ""
+  ).trim();
+
+  if (/^[0-9]{5,25}$/.test(preferredId) && !ids.includes(preferredId)) {
+    ids.unshift(preferredId);
+  }
+
+  return {
+    id: /^[0-9]{5,25}$/.test(preferredId) ? preferredId : (ids[0] || ""),
+    ids
+  };
+}
+
+const developerSettings = getSessionDeveloperSettings(savedConfig);
+const DEV_ID = developerSettings.id;
+const DEV_IDS = developerSettings.ids;
+
 const config = {
   BOT_NAME: "QUASAR",
   BOT_NICK: String(sessionConfig.BOT_NICK || savedConfig.BOT_NICK || "𝚀𝚄𝙰𝚂𝙰𝚁 ⦓ ⚛️ ⦔"),
   NICK_GUARD_ENABLED: (sessionConfig.NICK_GUARD_ENABLED ?? savedConfig.NICK_GUARD_ENABLED) !== false,
   DEV_ID,
   DEV_IDS,
-  DEV_NICK: String(savedConfig.DEV_NICK || "𝚂𝙷𝙰𝙳𝙾𝚆 ⦓ ⚛️ ⦔"),
+  DEV_NICK: String(sessionConfig.DEV_NICK || (SESSION_ID === "1" ? savedConfig.DEV_NICK : "") || "𝚂𝙷𝙰𝙳𝙾𝚆 ⦓ ⚛️ ⦔"),
+  DEV_NICK_GUARD_ENABLED: (
+    sessionConfig.DEV_NICK_GUARD_ENABLED ??
+    (SESSION_ID === "1" ? savedConfig.DEV_NICK_GUARD_ENABLED : undefined)
+  ) !== false,
   DEV_NAME: "SHADOW"
 };
 
@@ -334,24 +375,32 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
       } catch {}
 
       const latestSession = latest.SESSIONS?.[SESSION_ID] || {};
-      config.BOT_NICK = String(latestSession.BOT_NICK || latest.BOT_NICK || config.BOT_NICK);
-      config.DEV_NICK = String(latest.DEV_NICK || config.DEV_NICK);
-      config.NICK_GUARD_ENABLED = (latestSession.NICK_GUARD_ENABLED ?? latest.NICK_GUARD_ENABLED) !== false;
+      const legacyConfig = SESSION_ID === "1" ? latest : {};
 
-      const developerIds = (
-        Array.isArray(latest.DEV_IDS) && latest.DEV_IDS.length
-          ? latest.DEV_IDS
-          : [latest.DEV_ID || config.DEV_ID]
-      ).map(String).filter(id => /^[0-9]{5,25}$/.test(id));
+      config.BOT_NICK = String(latestSession.BOT_NICK || latest.BOT_NICK || config.BOT_NICK);
+      config.DEV_NICK = String(latestSession.DEV_NICK || legacyConfig.DEV_NICK || config.DEV_NICK);
+      config.NICK_GUARD_ENABLED = (latestSession.NICK_GUARD_ENABLED ?? latest.NICK_GUARD_ENABLED) !== false;
+      config.DEV_NICK_GUARD_ENABLED = (
+        latestSession.DEV_NICK_GUARD_ENABLED ??
+        legacyConfig.DEV_NICK_GUARD_ENABLED
+      ) !== false;
+
+      const developerSettings = getSessionDeveloperSettings(latest);
+      config.DEV_ID = developerSettings.id;
+      config.DEV_IDS = developerSettings.ids;
 
       const targets = [
-        { id: String(BOT_ID), nickname: config.BOT_NICK, label: "البوت" },
-        ...developerIds
-          .filter(id => id !== String(BOT_ID))
-          .map(id => ({ id, nickname: config.DEV_NICK, label: "المطور" }))
+        ...(config.NICK_GUARD_ENABLED
+          ? [{ id: String(BOT_ID), nickname: config.BOT_NICK, label: "البوت" }]
+          : []),
+        ...(config.DEV_NICK_GUARD_ENABLED
+          ? config.DEV_IDS
+              .filter(id => id !== String(BOT_ID))
+              .map(id => ({ id, nickname: config.DEV_NICK, label: "المطور" }))
+          : [])
       ].filter(target => target.nickname && target.nickname.trim());
 
-      if (!config.NICK_GUARD_ENABLED || !targets.length) return;
+      if (!targets.length) return;
 
       const data = loadData();
       const ids = [...new Set([
@@ -470,7 +519,7 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
   }
 
   discoverBotGroups().then(checkBotNicknames);
-  setInterval(checkBotNicknames, 60000);
+  setInterval(checkBotNicknames, 7000);
   checkSavedGroupNames();
   setInterval(checkSavedGroupNames, 30000);
 
@@ -742,11 +791,7 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
       liveConfig = config;
     }
 
-    const developerIds = (
-      Array.isArray(liveConfig.DEV_IDS) && liveConfig.DEV_IDS.length
-        ? liveConfig.DEV_IDS
-        : [liveConfig.DEV_ID || config.DEV_ID]
-    ).map(String);
+    const developerIds = getSessionDeveloperSettings(liveConfig).ids;
     const isDeveloper = developerIds.includes(senderID);
 
     const publicMode = data.publicMode === true;
