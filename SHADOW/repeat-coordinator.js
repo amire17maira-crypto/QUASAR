@@ -10,10 +10,17 @@ function getLockDirectory() {
   return path.resolve(root);
 }
 
-function getLockPath(threadID, directory = getLockDirectory()) {
+function getLockPath(
+  threadID,
+  directory = getLockDirectory(),
+  sessionId = process.env.SHADOW_SESSION_ID || "1"
+) {
   const id = String(threadID || "").trim();
   if (!id || id.length > 256) throw new Error("معرف المجموعة غير صالح");
-  const key = crypto.createHash("sha256").update(id).digest("hex");
+  const session = String(sessionId || "1").trim();
+  const key = crypto.createHash("sha256")
+    .update(session + ":" + id)
+    .digest("hex");
   return path.join(directory, `${key}.lock`);
 }
 
@@ -41,14 +48,15 @@ function acquireRepeatLock(threadID, kind) {
   const directory = getLockDirectory();
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   try { fs.chmodSync(directory, 0o700); } catch {}
-  const file = getLockPath(threadID, directory);
+  const sessionId = String(process.env.SHADOW_SESSION_ID || "1");
   const record = {
     token: crypto.randomBytes(18).toString("hex"),
     pid: process.pid,
-    sessionId: String(process.env.SHADOW_SESSION_ID || "1"),
+    sessionId,
     kind: String(kind || "repeat"),
     createdAt: new Date().toISOString()
   };
+  const file = getLockPath(threadID, directory, sessionId);
 
   for (let attempt = 0; attempt < 2; attempt++) {
     let descriptor;
@@ -79,7 +87,13 @@ function acquireRepeatLock(threadID, kind) {
 function releaseRepeatLock(threadID, lock) {
   if (!lock || !lock.token) return false;
   let file;
-  try { file = getLockPath(threadID); } catch { return false; }
+  try {
+    file = getLockPath(
+      threadID,
+      getLockDirectory(),
+      lock.sessionId || process.env.SHADOW_SESSION_ID || "1"
+    );
+  } catch { return false; }
   const current = readLock(file);
   if (!current || current.token !== lock.token || Number(current.pid) !== process.pid) return false;
   try {

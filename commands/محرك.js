@@ -9,8 +9,8 @@ const ENGINE_INTERVALS = Object.freeze({
 const STATE_PREFIX = "__shadow_engines__:";
 const { acquireRepeatLock, releaseRepeatLock } = require("../SHADOW/repeat-coordinator");
 
-function stateKey(threadID) {
-  return STATE_PREFIX + String(threadID);
+function stateKey(threadID, sessionId = process.env.SHADOW_SESSION_ID || "1") {
+  return STATE_PREFIX + String(sessionId) + ":" + String(threadID);
 }
 
 function sendOnce(api, message, threadID) {
