@@ -4,6 +4,8 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { Jimp, loadFont } = require("jimp");
+const GIFEncoder = require("gif-encoder-2");
+const { PNG } = require("pngjs");
 
 const WIDTH = 1400;
 const HEIGHT = 1000;
@@ -129,7 +131,7 @@ function directorySize(root) {
   return total;
 }
 
-function getPanelStatus(file) {
+function getPanelStatus(file, now = Date.now()) {
   try {
     const data = JSON.parse(fs.readFileSync(file, "utf8"));
     const start = Date.parse(data.startedAt);
@@ -148,7 +150,7 @@ function getPanelStatus(file) {
 
     return {
       online: true,
-      uptime: formatDuration(Date.now() - start),
+      uptime: formatDuration(now - start),
       startedAt: new Date(start).toISOString().replace("T", " ").slice(0, 19) + " UTC"
     };
   } catch {
@@ -208,7 +210,7 @@ function getStorage(dir) {
   }
 }
 
-function getSystemMetrics(dataDir, projectDir, statusFile) {
+function getSystemMetrics(dataDir, projectDir, statusFile, now = Date.now()) {
   const memory = getMemory();
   const hosting = getHosting();
   const cpus = os.cpus() || [];
@@ -216,7 +218,7 @@ function getSystemMetrics(dataDir, projectDir, statusFile) {
 
   return {
     generated: new Date().toISOString(),
-    panel: getPanelStatus(statusFile),
+    panel: getPanelStatus(statusFile, now),
     ram: memory,
     storage: getStorage(projectDir),
     projectSize: directorySize(projectDir),
@@ -264,7 +266,7 @@ async function createSessionCard(options = {}) {
     options.dataDir || projectDir
   );
   const statusFile = path.join(dataDir, "panel-status.json");
-  const m = getSystemMetrics(dataDir, projectDir, statusFile);
+  const m = getSystemMetrics(dataDir, projectDir, statusFile, options.now ?? Date.now());
 
   const fontRoot = path.resolve(
     path.dirname(require.resolve("@jimp/plugin-print")),
@@ -358,8 +360,47 @@ async function createSessionCard(options = {}) {
   return image.getBuffer("image/png");
 }
 
+
+async function createSessionGif(options = {}) {
+  const encoder = new GIFEncoder(WIDTH, HEIGHT);
+  encoder.setRepeat(0);
+  encoder.setDelay(1000);
+  encoder.setQuality(15);
+
+  const output = encoder.createReadStream();
+  const chunks = [];
+
+  const finished = new Promise((resolve, reject) => {
+    output.on("data", chunk => chunks.push(chunk));
+    output.once("end", () => resolve(Buffer.concat(chunks)));
+    output.once("error", reject);
+  });
+
+  const start = Date.now();
+  encoder.start();
+
+  try {
+    // Four frames: the panel uptime advances once per second.
+    for (let i = 0; i < 4; i++) {
+      const pngBuffer = await createSessionCard({
+        ...options,
+        now: start + i * 1000
+      });
+      const frame = PNG.sync.read(pngBuffer);
+      encoder.addFrame(frame.data);
+    }
+
+    encoder.finish();
+    return await finished;
+  } catch (error) {
+    try { encoder.finish(); } catch {}
+    throw error;
+  }
+}
+
 module.exports = {
   createSessionCard,
+  createSessionGif,
   formatBytes,
   formatDuration,
   getSystemMetrics

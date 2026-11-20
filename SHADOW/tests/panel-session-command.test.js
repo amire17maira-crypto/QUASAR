@@ -8,7 +8,7 @@ const assert = require("node:assert/strict");
 
 const command = require("../../commands/جلسة");
 
-test("يرسل بطاقة QUASAR كصورة PNG", async () => {
+test("يرسل بطاقة QUASAR كصورة GIF متحركة", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quasar-panel-"));
   const previous = process.env.SHADOW_DATA_DIR;
 
@@ -35,9 +35,10 @@ test("يرسل بطاقة QUASAR كصورة PNG", async () => {
     assert.equal(payload.threadID, "test-group");
     assert.equal(payload.message.body, "QUASAR SYSTEM OVERVIEW");
     assert.ok(Buffer.isBuffer(payload.message.attachment));
+    assert.equal(payload.message.attachment.toString("ascii", 0, 6), "GIF89a");
     assert.deepEqual(
-      [...payload.message.attachment.subarray(0, 8)],
-      [137, 80, 78, 71, 13, 10, 26, 10]
+      [...payload.message.attachment.subarray(0, 6)],
+      [71, 73, 70, 56, 57, 97]
     );
   } finally {
     if (previous === undefined) delete process.env.SHADOW_DATA_DIR;
@@ -47,7 +48,7 @@ test("يرسل بطاقة QUASAR كصورة PNG", async () => {
   }
 });
 
-test("يرسل البطاقة حتى عند عدم وجود ملف حالة الواجهة", async () => {
+test("يرسل GIF حتى عند عدم وجود ملف حالة الواجهة", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "quasar-panel-"));
   const previous = process.env.SHADOW_DATA_DIR;
 
@@ -65,6 +66,7 @@ test("يرسل البطاقة حتى عند عدم وجود ملف حالة ال
 
     assert.equal(payload.message.body, "QUASAR SYSTEM OVERVIEW");
     assert.ok(Buffer.isBuffer(payload.message.attachment));
+    assert.equal(payload.message.attachment.toString("ascii", 0, 6), "GIF89a");
   } finally {
     if (previous === undefined) delete process.env.SHADOW_DATA_DIR;
     else process.env.SHADOW_DATA_DIR = previous;

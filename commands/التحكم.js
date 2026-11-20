@@ -15,7 +15,8 @@ const DEVELOPER_ONLY_COMMANDS = new Set([
   "محرك", "بيس",
   "setbio", "بايو", "bio", "changebio", "botbio",
   "صورة", "avatar", "changeavatar", "botavatar",
-  "command", "cmd"
+  "command", "cmd",
+    "aut",
 ]);
 
 const controlStates = new Map();
@@ -566,7 +567,8 @@ module.exports = async function (
           BOT_ID,
           builtInCommandNames,
           customCommandNames,
-          commands
+          commands,
+          ...(commandName === "aut" ? [{ isDeveloper: true }] : [])
         )
       );
 
