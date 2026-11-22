@@ -2,19 +2,32 @@
 
 const { createSessionGif } = require("../SHADOW/session-card");
 
-module.exports = async (api, event) => {
+const command = async (api, event) => {
   try {
     const gif = await createSessionGif();
 
-    return api.sendMessage({
-      body: "QUASAR SYSTEM OVERVIEW",
-      attachment: gif
-    }, event.threadID);
-  } catch (error) {
-    console.error("QUASAR SESSION GIF ERROR:", error);
+    if (!Buffer.isBuffer(gif) ||
+        !["GIF89a", "GIF87a"].includes(gif.toString("ascii", 0, 6))) {
+      throw new Error("Invalid GIF generated");
+    }
+
     return api.sendMessage(
-      "❌ تعذر إنشاء صورة حالة QUASAR.",
+      {
+        body: "QUASAR SYSTEM OVERVIEW",
+        attachment: gif
+      },
+      event.threadID
+    );
+  } catch (error) {
+    console.error("[SESSION COMMAND ERROR]", error);
+
+    return api.sendMessage(
+      "❌ تعذر إرسال بطاقة جلسة QUASAR.",
       event.threadID
     );
   }
 };
+
+command.aliases = ["session", "حالة"];
+
+module.exports = command;

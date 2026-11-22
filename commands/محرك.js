@@ -101,8 +101,11 @@ async function startEngine(api, threadID, automicTimers, engineID, text) {
 
   const reservation = acquireRepeatLock(threadID, "محرك " + id);
   if (!reservation.acquired) {
-    const error = new Error("يوجد نظام تكرار آخر يعمل في هذه المجموعة. أوقفه أولاً قبل تشغيل محرك.");
-    error.code = "REPEAT_BUSY";
+    const message = reservation.stale
+      ? "يوجد حجز تكرار قديم في هذه المجموعة. أوقف جميع جلسات QUASAR أولاً، ثم نظّف ملف الحجز القديم يدوياً قبل إعادة التشغيل."
+      : "يوجد نظام تكرار آخر يعمل في هذه المجموعة. أوقفه أولاً قبل تشغيل محرك.";
+    const error = new Error(message);
+    error.code = reservation.stale ? "REPEAT_STALE" : "REPEAT_BUSY";
     throw error;
   }
 

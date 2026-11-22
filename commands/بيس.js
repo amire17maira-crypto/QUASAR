@@ -96,7 +96,10 @@ module.exports = async (api, event, args, startTime, loadData, saveData, automic
   clearBis(automicTimers, threadID);
   const reservation = acquireRepeatLock(threadID, "بيس");
   if (!reservation.acquired) {
-    return api.sendMessage("⚠️ يوجد نظام تكرار آخر يعمل في هذه المجموعة. أوقفه أولاً قبل تشغيل بيس.", threadID);
+    const message = reservation.stale
+      ? "⚠️ يوجد حجز تكرار قديم في هذه المجموعة. أوقف جميع جلسات QUASAR أولاً، ثم نظّف ملف الحجز القديم يدوياً قبل إعادة التشغيل."
+      : "⚠️ يوجد نظام تكرار آخر يعمل في هذه المجموعة. أوقفه أولاً قبل تشغيل بيس.";
+    return api.sendMessage(message, threadID);
   }
 
   const state = {

@@ -1,112 +1,123 @@
-const os = require("os");
+"use strict";
 
 const command = async (
-  api, event, args, startTime,
-  loadData, saveData, automicTimers,
-  config, hostingInfo, botSentMessages, BOT_ID,
-  builtInCommands, customCommandNames
+  api,
+  event,
+  args,
+  startTime,
+  loadData,
+  saveData,
+  automicTimers,
+  config,
+  hostingInfo,
+  botSentMessages,
+  BOT_ID,
+  builtInCommands,
+  customCommandNames
 ) => {
   try {
-    const data = typeof loadData === "function" ? loadData() || {} : {};
+    // قراءة بيانات البوت
+    let data = {};
 
-    const elapsed = Number(startTime) > 0
-      ? Math.max(0, Date.now() - Number(startTime))
-      : process.uptime() * 1000;
-
-    function duration(ms) {
-      let s = Math.floor(ms / 1000);
-      const d = Math.floor(s / 86400);
-      s %= 86400;
-      const h = Math.floor(s / 3600);
-      s %= 3600;
-      const m = Math.floor(s / 60);
-      s %= 60;
-      return `${d} يوم، ${h} ساعة، ${m} دقيقة، ${s} ثانية`;
+    try {
+      data = typeof loadData === "function" ? (loadData() || {}) : {};
+    } catch (_) {
+      data = {};
     }
 
-    function bytes(value) {
-      if (!Number.isFinite(value)) return "غير معروف";
-      const units = ["B", "KB", "MB", "GB", "TB"];
-      let n = value;
-      let i = 0;
-      while (n >= 1024 && i < units.length - 1) {
-        n /= 1024;
-        i++;
+    // حساب مدة التشغيل
+    const startedAt = Number(startTime);
+
+    const elapsed = startedAt > 0
+      ? Math.max(0, Date.now() - startedAt)
+      : Math.max(0, process.uptime() * 1000);
+
+    let totalSeconds = Math.floor(elapsed / 1000);
+
+    const days = Math.floor(totalSeconds / 86400);
+    totalSeconds %= 86400;
+
+    const hours = Math.floor(totalSeconds / 3600);
+    totalSeconds %= 3600;
+
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    // البادئة
+    const prefix =
+      typeof data.prefix === "string" && data.prefix.trim()
+        ? data.prefix.trim()
+        : "!";
+
+    // تحديد الاستضافة تلقائياً
+    let hosting = "";
+
+    if (
+      process.env.RAILWAY_PROJECT_ID ||
+      process.env.RAILWAY_SERVICE_ID ||
+      process.env.RAILWAY_DEPLOYMENT_ID
+    ) {
+      hosting = "Railway";
+    } else if (
+      process.env.RENDER ||
+      process.env.RENDER_SERVICE_ID
+    ) {
+      hosting = "Render";
+    } else if (process.env.HEROKU_APP_NAME) {
+      hosting = "Heroku";
+    } else if (
+      process.env.VERCEL ||
+      process.env.VERCEL_ENV
+    ) {
+      hosting = "Vercel";
+    } else if (
+      process.env.TERMUX_VERSION ||
+      (process.env.PREFIX || "").includes("com.termux")
+    ) {
+      hosting = "Termux";
+    } else if (hostingInfo && typeof hostingInfo === "object") {
+      const detected =
+        hostingInfo.provider ||
+        hostingInfo.hosting ||
+        hostingInfo.name;
+
+      if (typeof detected === "string" && detected.trim()) {
+        hosting = detected.trim();
       }
-      return `${n.toFixed(2)} ${units[i]}`;
     }
 
-    function count(value) {
-      if (Array.isArray(value)) return value.length;
-      if (value && typeof value === "object")
-        return Object.keys(value).length;
-      return 0;
+    // الاسم الافتراضي عند تعذر تحديد الاستضافة
+    if (!hosting) {
+      hosting = "QUASAR v. 28";
     }
 
-    const mem = process.memoryUsage();
-    const cpus = os.cpus();
-    const totalMem = os.totalmem();
-    const freeMem = os.freemem();
-
-    const botStart = new Date(Date.now() - elapsed)
-      .toLocaleString("ar-EG");
-
-    const load = os.loadavg().map(n => n.toFixed(2)).join(" / ");
-
-    const msg = [
-      "🌌✨━━━━━━━━━━ ⚛️ QUASAR ⚛️ ━━━━━━━━━━✨🌌",
-      "                 📊 إحصائيات وحالة النظام",
-      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    const message = [
+      "⏳ UPTIME・وقت التشغيل",
       "",
-      "╭━━━ 🟢 حالة البوت ━━━╮",
-      "│ الحالة: ONLINE",
-      `│ الاسم: ${config?.BOT_NAME || "QUASAR"}`,
-      "╰━━━━━━━━━━━━━━━━━━━━╯",
+      `📅 Days・الأيام: ${days}`,
+      `🕒 Hours・الساعات: ${hours}`,
+      `⏱️ Minutes・الدقائق: ${minutes}`,
+      `⌛ Seconds・الثواني: ${seconds}`,
       "",
-      "╭━━━ ⏱️ مدة التشغيل ━━━╮",
-      `│ مدة التشغيل: ${duration(elapsed)}`,
-      `│ بدأ التشغيل: ${botStart}`,
-      `│ مدة عملية Node: ${duration(process.uptime() * 1000)}`,
-      "╰━━━━━━━━━━━━━━━━━━━━━━╯",
+      "⚡ Status・الحالة: Online",
+      `🔰 Prefix・البادئة: ${prefix}`,
+      `🖥️ Hosting・الاستضافة: ${hosting}`,
+      "🌐 Connection・الاتصال: Stable",
       "",
-      "╭━━━ 💻 معلومات النظام ━━━╮",
-      `│ النظام: ${os.type()} ${os.release()}`,
-      `│ المعمارية: ${os.arch()}`,
-      `│ Node.js: ${process.version}`,
-      `│ المعالج: ${cpus[0]?.model || "غير معروف"}`,
-      `│ عدد الأنوية: ${cpus.length}`,
-      `│ حمل النظام: ${load}`,
-      "╰━━━━━━━━━━━━━━━━━━━━━━━━╯",
-      "",
-      "╭━━━ 🧠 الذاكرة ━━━╮",
-      `│ الرام المستخدمة: ${bytes(totalMem - freeMem)}`,
-      `│ الرام المتاحة: ${bytes(freeMem)}`,
-      `│ الرام الإجمالية: ${bytes(totalMem)}`,
-      `│ ذاكرة البوت RSS: ${bytes(mem.rss)}`,
-      `│ Heap Used: ${bytes(mem.heapUsed)}`,
-      `│ Heap Total: ${bytes(mem.heapTotal)}`,
-      "╰━━━━━━━━━━━━━━━━━━╯",
-      "",
-      "╭━━━ 📈 إحصائيات البوت ━━━╮",
-      `│ المجموعات المحفوظة: ${count(data.savedGroupNames)}`,
-      `│ الأوامر الأساسية: ${count(builtInCommands)}`,
-      `│ الأوامر المخصصة: ${count(customCommandNames)}`,
-      `│ أنظمة القفل: ${count(data.locked)}`,
-      `│ أنظمة الحماية: ${count(data.protected)}`,
-      `│ المؤقتات النشطة: ${count(automicTimers)}`,
-      "╰━━━━━━━━━━━━━━━━━━━━━━━━╯",
-      "",
-      "🌠 QUASAR",
-      "             Powered by ⚛️"
+      "⌁ Powered by QUASAR 📡"
     ].join("\n");
 
-    return api.sendMessage(msg, event.threadID);
-  } catch (err) {
-    console.log("SHADOW UPTIME ERROR:", err.stack || err);
-    return api.sendMessage("تعذر عرض معلومات حالة البوت.", event.threadID);
+    return api.sendMessage(message, event.threadID);
+  } catch (error) {
+    console.error("[UPTIME ERROR]", error);
+
+    return api.sendMessage(
+      "❌ حدث خطأ أثناء عرض وقت تشغيل QUASAR.",
+      event.threadID
+    );
   }
 };
 
-
 command.aliases = ["ابتايم"];
+
 module.exports = command;

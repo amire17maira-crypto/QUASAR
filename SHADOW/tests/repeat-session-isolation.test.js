@@ -52,6 +52,79 @@ test("مفاتيح بيس ومحرك وaut تختلف بين الجلسات", ()
   assert.notEqual(aut.stateKey("same-group", "1"), aut.stateKey("same-group", "2"));
 });
 
-test("aut يفحص كل 80 ثانية", () => {
+test("aut يحتفظ بفاصل 80 ثانية كقيمة افتراضية", () => {
   assert.equal(aut.POLL_GAP_MS, 80_000);
+  assert.deepEqual(aut.parseAutInput("مرحبا"), {
+    text: "مرحبا", intervalMs: 80_000, intervalSeconds: 80, error: null
+  });
+});
+
+test("aut يقبل فاصل 200s دون تغيير نص الرسالة", () => {
+  const result = aut.parseAutInput("مرحبا\nكيف حالك 200s");
+  assert.equal(result.text, "مرحبا\nكيف حالك");
+  assert.equal(result.intervalMs, 200_000);
+  assert.equal(result.intervalSeconds, 200);
+  assert.equal(result.error, null);
+  assert.equal(aut.parseAutInput("مرحبا 200 s").intervalMs, 200_000);
+});
+
+test("aut يرفض الفواصل الأقل من 12 ثانية والأكبر من 24 ساعة", () => {
+  assert.ok(aut.parseAutInput("مرحبا 5s").error);
+  assert.ok(aut.parseAutInput("مرحبا 90000s").error);
+});
+
+test("الحجز القديم لا يُحذف تلقائياً ولا يمكنه حذف حجز جديد", t => {
+  const staleDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "quasar-stale-lock-")
+  );
+
+  const previousDir = process.env.SHADOW_REPEAT_LOCK_DIR;
+  const previousSession = process.env.SHADOW_SESSION_ID;
+
+  try {
+    process.env.SHADOW_REPEAT_LOCK_DIR = staleDir;
+    process.env.SHADOW_SESSION_ID = "stale-test";
+
+    const file = coordinator.getLockPath(
+      "stale-group",
+      staleDir,
+      "stale-test"
+    );
+
+    const staleRecord = {
+      token: "old-token",
+      pid: -1,
+      sessionId: "stale-test",
+      kind: "بيس",
+      createdAt: new Date().toISOString()
+    };
+
+    fs.writeFileSync(file, JSON.stringify(staleRecord));
+
+    const result = coordinator.acquireRepeatLock(
+      "stale-group",
+      "محرك"
+    );
+
+    assert.equal(result.acquired, false);
+    assert.equal(result.stale, true);
+    assert.equal(fs.existsSync(file), true);
+
+    const stillStored = JSON.parse(fs.readFileSync(file, "utf8"));
+    assert.equal(stillStored.token, "old-token");
+  } finally {
+    if (previousDir === undefined) {
+      delete process.env.SHADOW_REPEAT_LOCK_DIR;
+    } else {
+      process.env.SHADOW_REPEAT_LOCK_DIR = previousDir;
+    }
+
+    if (previousSession === undefined) {
+      delete process.env.SHADOW_SESSION_ID;
+    } else {
+      process.env.SHADOW_SESSION_ID = previousSession;
+    }
+
+    fs.rmSync(staleDir, { recursive: true, force: true });
+  }
 });

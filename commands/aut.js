@@ -4,11 +4,27 @@
 // then leave the group after 16 minutes without human activity.
 const STATE_PREFIX = "__alpha_aut__:";
 const POLL_GAP_MS = 80 * 1000;
+const MIN_INTERVAL_SECONDS = 12;
+const MAX_INTERVAL_SECONDS = 86400;
 const IDLE_LIMIT_MS = 16 * 60 * 1000;
 const TYPING_TIME_MS = 3 * 1000;
 const HISTORY_LIMIT = 100;
 const HISTORY_TIMEOUT_MS = 10000;
 const MAX_SEEN_MESSAGES = 5000;
+
+function parseAutInput(value) {
+  const original = String(value || "").trim();
+  const match = original.match(/(?:^|\s)(\d+)\s*s$/i);
+  if (!match) {
+    return { text: original, intervalMs: POLL_GAP_MS, intervalSeconds: 80, error: null };
+  }
+  const seconds = Number(match[1]);
+  const text = original.slice(0, match.index).trimEnd();
+  if (!Number.isSafeInteger(seconds) || seconds < MIN_INTERVAL_SECONDS || seconds > MAX_INTERVAL_SECONDS) {
+    return { text, intervalMs: POLL_GAP_MS, intervalSeconds: 80, error: `الفاصل يجب أن يكون من ${MIN_INTERVAL_SECONDS} إلى ${MAX_INTERVAL_SECONDS} ثانية.` };
+  }
+  return { text, intervalMs: seconds * 1000, intervalSeconds: seconds, error: null };
+}
 const LEAVE_TIMEOUT_MS = 10000;
 
 const STOP_TEXT =
@@ -333,6 +349,10 @@ module.exports = async function autCommand(
     text = String(event.messageReply.body).trim();
   }
 
+  const parsedInput = parseAutInput(text);
+  if (parsedInput.error) return reply(`❌ ${parsedInput.error}`);
+  text = parsedInput.text;
+
   if (!text) {
     return reply(
       "🤖 Aut — يرد على أحدث رسالة بشرية جديدة\n" +
@@ -353,6 +373,7 @@ module.exports = async function autCommand(
     botID: normalizeId(BOT_ID),
     botSentMessages,
     text,
+    pollGapMs: parsedInput.intervalMs,
     since: startedAt,
     lastHumanAt: startedAt,
     lastTargetID: null,
@@ -414,7 +435,7 @@ module.exports = async function autCommand(
       pollAndReply().catch(error => {
         console.error("ALPHA AUT POLL ERROR:", error?.message || error);
       });
-    }, POLL_GAP_MS);
+    }, job.pollGapMs);
     if (typeof job.timer.unref === "function") job.timer.unref();
   };
 
@@ -485,7 +506,7 @@ module.exports = async function autCommand(
 
   const started = await reply(
     "🤖 Aut يعمل الآن.\n" +
-    "يفحص كل 80 ثانية ويرد على أحدث رسالة بشرية بعد إظهار الكتابة 3 ثوانٍ.\n" +
+    "يفحص كل " + parsedInput.intervalSeconds + " ثانية ويرد على أحدث رسالة بشرية بعد إظهار الكتابة 3 ثوانٍ.\n" +
     "إذا مرّت 16 دقيقة دون رسالة بشرية، يرسل الختامية ثم يغادر المجموعة.\n" +
     "للإيقاف اليدوي: aut off"
   );
@@ -494,7 +515,7 @@ module.exports = async function autCommand(
     return;
   }
 
-  // First scan is immediate; all subsequent scans are 80 seconds apart.
+  // First scan is immediate; subsequent scans use the selected interval.
   await pollAndReply();
 };
 
@@ -514,3 +535,7 @@ module.exports.constants = {
   MAX_SEEN_MESSAGES,
   STOP_TEXT
 };
+
+module.exports.parseAutInput = parseAutInput;
+module.exports.MIN_INTERVAL_SECONDS = MIN_INTERVAL_SECONDS;
+module.exports.MAX_INTERVAL_SECONDS = MAX_INTERVAL_SECONDS;

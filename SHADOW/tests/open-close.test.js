@@ -65,6 +65,12 @@ test("أوامر المطور تبقى محمية في الوضع المفتوح
   }
 });
 
+test("لوحة التحكم واختصاراتها للمطور فقط حتى في الوضع المفتوح", () => {
+  for (const cmd of ["التحكم", "لوحة", "تحكم"]) {
+    assert.equal(canExecuteCommand({ cmd, isDeveloper: false, publicMode: true }), false, cmd);
+  }
+});
+
 test("المطور يستطيع تنفيذ الأوامر المحمية في الوضعين", () => {
   for (const publicMode of [false, true]) {
     assert.equal(canExecuteCommand({

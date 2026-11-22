@@ -9,6 +9,7 @@ const DEVELOPER_ONLY_COMMANDS = new Set([
   "خروج", "leave",
   "تحميل", "autodownload", "download",
   "command", "cmd",
+  "التحكم", "لوحة", "تحكم", "au",
   "فتح", "open", "فتح_عام",
   "قفل", "close", "قفل_عام"
 ]);

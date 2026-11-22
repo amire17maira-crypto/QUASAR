@@ -11,13 +11,7 @@ const SWEAR_WORDS = [
   "ملعون", "حقير", "كس", "زب", "طيز", "خول", "مخنث", "شاذ"
 ];
 
-const DEVELOPER_ONLY_COMMANDS = new Set([
-  "محرك", "بيس",
-  "setbio", "بايو", "bio", "changebio", "botbio",
-  "صورة", "avatar", "changeavatar", "botavatar",
-  "command", "cmd",
-    "aut",
-]);
+const { DEVELOPER_ONLY_COMMANDS } = require("../SHADOW/command-access");
 
 const controlStates = new Map();
 
@@ -153,12 +147,12 @@ function getCommandNames(commands) {
   );
 }
 
-function isDeveloper(senderID, config) {
+function isDeveloper(senderID, config, access = {}) {
+  if (access?.isDeveloper === true) return true;
   const ids = [
     ...(Array.isArray(config?.DEV_IDS) ? config.DEV_IDS : []),
     config?.DEV_ID
   ].filter(Boolean).map(String);
-
   return ids.includes(String(senderID));
 }
 
@@ -183,7 +177,8 @@ module.exports = async function (
   BOT_ID,
   builtInCommandNames = [],
   customCommandNames = [],
-  commands = {}
+  commands = {},
+  access = {}
 ) {
   const originThreadID = String(event?.threadID || "");
   const senderID = String(event?.senderID || "");
@@ -202,6 +197,10 @@ module.exports = async function (
       originThreadID,
       messageID
     );
+  }
+
+  if (!isDeveloper(senderID, config, access)) {
+    return send(api, "⛔ لوحة التحكم مخصصة للمطور فقط.", originThreadID, messageID);
   }
 
   if (!rawText || /^(قائمة|list)$/i.test(rawText)) {
@@ -526,7 +525,7 @@ module.exports = async function (
 
     if (
       DEVELOPER_ONLY_COMMANDS.has(commandName) &&
-      !isDeveloper(senderID, config)
+      !isDeveloper(senderID, config, access)
     ) {
       return send(
         api,
