@@ -796,9 +796,14 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
 
     const publicMode = data.publicMode === true;
 
-    if (!canExecuteCommand({ cmd, isDeveloper, publicMode })) {
-      stats.recordUnauthorized(cmd);
-      return;
+    // 🌟 التعديل الجديد: السماح بكل الأوامر في الخاص بدون حظر
+    const isPrivateChat = event.isGroup === false || String(event.threadID) === String(event.senderID);
+
+    if (!isPrivateChat) {
+      if (!canExecuteCommand({ cmd, isDeveloper, publicMode })) {
+        stats.recordUnauthorized(cmd);
+        return;
+      }
     }
 
     try {
