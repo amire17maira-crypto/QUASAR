@@ -543,16 +543,6 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
     reportedOnline = true;
     sessionErrorLogged = false;
 
-    // ==========================================
-    // 🚨 صائد الرسائل (خاص فقط) 🚨
-    // ==========================================
-    const isPrivateEvent = event.isGroup === false || String(event.threadID) === String(event.senderID);
-
-    if (["message", "message_reply"].includes(event.type) && isPrivateEvent) {
-      console.log(`\n📥 [خاص] رسالة واردة من: ${event.senderID} | المحادثة: ${event.threadID}`);
-      if (event.body) console.log(`📝 [النص]: "${event.body}"\n`);
-    }
-
     try { stats.recordMessage(event); } catch (e) {}
 
     const eventThreadID = String(event.threadID || "");
@@ -620,6 +610,29 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
       return;
     }
 
+    // 🚨 رد "منو عمك"
+    if (body === "منو عمك" || body === "منو عمك؟" || body === "منو عمك ?") {
+      try {
+        await sendMessageAsync(api, "هتلر مع علم ألمانيا 🇩🇪", event.threadID);
+      } catch (e) {}
+      return;
+    }
+
+    // 🚨 أمر الاختبار الجديد (يرسل رسالة للخاص)
+    if (body === PREFIX + "اختبر" || body === PREFIX + "test") {
+      console.log(`🔥 [اختبار]: المطور طلب إرسال رسالة للخاص (${senderID}).`);
+      
+      try {
+        await sendMessageAsync(api, "🔔 هذه رسالة اختبار من البوت إلى الخاص. إذا وصلتك، فالإرسال للخاص يعمل!", senderID);
+        console.log("✅ [اختبار]: تم إرسال الرسالة للخاص بنجاح!");
+        await api.sendMessage("✅ تم إرسال الرسالة إلى الخاص. اذهب وتفقد ماسنجر.", event.threadID);
+      } catch (error) {
+        console.log("❌ [اختبار]: فشل إرسال الرسالة للخاص:", error.message);
+        await api.sendMessage(`❌ فشل إرسال الرسالة للخاص.\nالسبب: ${error.message}`, event.threadID);
+      }
+      return;
+    }
+
     const developerIdsForReactions = new Set([...(Array.isArray(config.DEV_IDS) ? config.DEV_IDS : []), config.DEV_ID].filter(Boolean).map(String));
 
     if (developerIdsForReactions.has(senderID)) {
@@ -668,7 +681,7 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
     const isDeveloper = developerIds.includes(senderID);
     const publicMode = data.publicMode === true;
 
-    // إذا كانت الرسالة في الخاص، تخطى فحص الصلاحيات
+    const isPrivateEvent = event.isGroup === false || String(event.threadID) === String(event.senderID);
     if (!isPrivateEvent) {
       if (!canExecuteCommand({ cmd, isDeveloper, publicMode })) {
         stats.recordUnauthorized(cmd);
@@ -701,4 +714,32 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
       if (result?.catch) result.catch(e => {});
     } catch (e) {}
   });
+
+  // 🚨 نظام الفحص الدوري (Polling) للرسائل الخاصة 🚨
+  let lastCheckedTimestamp = Date.now();
+  setInterval(async () => {
+    try {
+      const threads = await api.getThreadList(20, null, ["INBOX"]);
+      for (const thread of threads) {
+        if (!thread.isGroup && thread.timestamp > lastCheckedTimestamp) {
+          const messages = await api.getThreadHistory(thread.threadID, 5);
+          for (const msg of messages) {
+            if (msg.senderID !== BOT_ID && msg.timestamp > lastCheckedTimestamp) {
+              console.log(`\n📥 [اكتشاف دوري] رسالة خاصة جديدة من: ${msg.senderID}`);
+              console.log(`📝 النص: "${msg.body}"`);
+              
+              if (msg.body === "-") {
+                await api.sendMessage("أحبك ❤️", thread.threadID);
+              } else if (msg.body === "منو عمك" || msg.body === "منو عمك؟") {
+                await api.sendMessage("هتلر مع علم ألمانيا 🇩🇪", thread.threadID);
+              }
+            }
+          }
+          lastCheckedTimestamp = Math.max(lastCheckedTimestamp, thread.timestamp);
+        }
+      }
+    } catch (e) {
+      // تجاهل الأخطاء
+    }
+  }, 30000);
 });
