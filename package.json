@@ -10,6 +10,7 @@
   "dependencies": {
     "@distube/ytdl-core": "^5.2.1",
     "@dongdev/fca-unofficial": "4.0.3",
+    "nexus-fca": "^3.4.0",
     "archiver": "^8.0.0",
     "axios": "^1.21.0",
     "canvas": "^3.2.3",
