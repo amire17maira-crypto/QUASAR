@@ -5,7 +5,7 @@ if (typeof global.SharedWorker === 'undefined') {
     };
 }
 
-const fcaLogin = require("nexus-fca");
+const fcaLogin = require("nexus-fca"); // تم استخدام nexus-fca لأنها الأفضل للحماية
 const { getThreadInfoSafe, getThreadListSafe, isCoolingDown, installThreadOperationGuard } = require("./thread-info-guard");
 const fs = require("fs");
 const path = require("path");
@@ -210,7 +210,17 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
     currentBotId = BOT_ID;
     console.log("✅ فليكس يعمل | ID:", BOT_ID);
 
-    // 1. إرسال رسالة التشغيل التلقائية للمطور
+    // 🚨 1. تفعيل أنظمة الحماية (الوضع الآمن)
+    try {
+        if (typeof api.setParallelSend === "function") api.setParallelSend(1); // إرسال متسلسل
+        if (typeof api.setFastSend === "function") api.setFastSend(false); // إيقاف الإرسال السريع
+        if (typeof api.autoTyping === "function") api.autoTyping(true); // تفعيل مؤشر الكتابة التلقائي
+        console.log("🛡️ تم تفعيل أنظمة الحماية (الوضع الآمن).");
+    } catch (protectionError) {
+        console.log("⚠️ بعض أنظمة الحماية غير مدعومة في هذا الإصدار:", protectionError.message);
+    }
+
+    // 2. إرسال رسالة التشغيل التلقائية للمطور
     if (DEV_ID) {
         setTimeout(() => {
             api.sendMessage("تم تشغيل فليكس ✅", DEV_ID).catch(e => console.log("فشل إرسال رسالة التشغيل:", e.message));
@@ -246,7 +256,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
     let reportedOnline = true;
     writeBotStatus(true);
 
-    // 2. ميزة منع الخروج من القروبات (Anti-Leave)
+    // 3. ميزة منع الخروج من القروبات (Anti-Leave)
     if (typeof api.on === "function") {
         api.on("log:unsubscribe", async (event) => {
             if (event.type === "log:unsubscribe") {
@@ -572,7 +582,8 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       } catch (e) {}
     }, 15000); 
 
-    api.listen(async (err, event) => {
+    // 🚨 استخدام api.listenMqtt (الأكثر استقراراً في nexus-fca)
+    api.listenMqtt(async (err, event) => {
       if (err) {
         const errorText = String(err?.message || err || "");
         console.log("SHADOW MQTT ERROR:", errorText);
@@ -610,13 +621,11 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       reportedOnline = true;
       sessionErrorLogged = false;
 
-      // 🚨 إخبار فيسبوك بأن الرسالة قد قُرئت (لتظهر علامة تم الاستلام)
+      // 🚨 إخبار فيسبوك بأن الرسالة قد قُرئت
       if (event.threadID && typeof api.markAsRead === "function") {
           try {
               await api.markAsRead(event.threadID);
-          } catch (e) {
-              // تجاهل الخطأ إذا كانت الدالة غير مدعومة
-          }
+          } catch (e) {}
       }
 
       try { stats.recordMessage(event); } catch (e) {}
@@ -760,8 +769,11 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
         }
       }
 
+      // 🚨 6. مؤشر الكتابة (Typing Indicator) لمدة 3 ثوانٍ
       try {
-        if (typeof api.sendTypingIndicator === "function") await api.sendTypingIndicator(String(event.threadID), true, { duration: 3000, autoStop: true });
+        if (typeof api.sendTypingIndicator === "function") {
+            await api.sendTypingIndicator(String(event.threadID), true, { duration: 3000, autoStop: true });
+        }
       } catch (typingError) {}
 
       await new Promise(resolve => setTimeout(resolve, 3000));
