@@ -5,7 +5,7 @@ if (typeof global.SharedWorker === 'undefined') {
     };
 }
 
-// 🚨 استخدام مكتبة aryan-nix-fca كما طلبت
+// 🚨 استخدام مكتبة aryan-nix-fca
 const fcaLogin = require("aryan-nix-fca");
 
 const { getThreadInfoSafe, getThreadListSafe, isCoolingDown, installThreadOperationGuard } = require("./thread-info-guard");
@@ -102,7 +102,20 @@ const config = {
 
 http.createServer((req, res) => res.end("ok")).listen(PORT, "127.0.0.1");
 
-const appState = JSON.parse(fs.readFileSync(SESSION_FILE, "utf8"));
+// 🚨 تحميل appState مع التحقق
+let appState = null;
+try {
+    const rawState = fs.readFileSync(SESSION_FILE, "utf8");
+    appState = JSON.parse(rawState);
+    if (!appState || (Array.isArray(appState) && appState.length === 0)) {
+        throw new Error("ملف appState فارغ أو غير صالح.");
+    }
+    console.log("✅ تم تحميل appState بنجاح. عدد الكوكيز:", Array.isArray(appState) ? appState.length : "غير معروف");
+} catch (e) {
+    console.error("❌ فشل تحميل appState:", e.message);
+    console.error("تأكد من وجود ملف appState.json صالح في المجلد الرئيسي.");
+    process.exit(1); // إيقاف البوت لأن الجلسة ضرورية
+}
 
 function loadData() {
   try {
@@ -202,16 +215,20 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
 
 (async () => {
   try {
-    // محاولة تسجيل الدخول باستخدام aryan-nix-fca
+    // 🚨 محاولة تسجيل الدخول باستخدام aryan-nix-fca مع تمرير appState بشكل صحيح
+    console.log("⏳ محاولة تسجيل الدخول عبر aryan-nix-fca...");
     let api;
     try {
-        api = await fcaLogin({ appState });
+        // نمرر appState كخاصية داخل الكائن، مع التأكد من أنه ليس null
+        api = await fcaLogin({ appState: appState });
     } catch (e) {
-        console.log("محاولة تسجيل الدخول عبر aryan-nix-fca فشلت:", e.message);
+        console.error("❌ فشل تسجيل الدخول عبر aryan-nix-fca:", e.message);
         throw e;
     }
 
-    if (!api) throw new Error("لم يتم إرجاع api من aryan-nix-fca");
+    if (!api || typeof api.getCurrentUserID !== "function") {
+        throw new Error("لم يتم إرجاع api صالح من aryan-nix-fca. تحقق من صحة appState.");
+    }
 
     const BOT_ID = api.getCurrentUserID();
     currentBotId = BOT_ID;
