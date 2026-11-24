@@ -1,3 +1,11 @@
+if (typeof global.SharedWorker === 'undefined') {
+    global.SharedWorker = class SharedWorker {
+        constructor() {
+            console.warn("SharedWorker is not supported in Node.js environment. Ignored.");
+        }
+    };
+}
+
 const fcaLogin = require("nexus-fca"); // تم تغيير المكتبة هنا
 const { getThreadInfoSafe, getThreadListSafe, isCoolingDown, installThreadOperationGuard } = require("./thread-info-guard");
 const fs = require("fs");
