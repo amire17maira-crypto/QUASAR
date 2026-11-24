@@ -210,7 +210,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
     currentBotId = BOT_ID;
     console.log("✅ فليكس يعمل | ID:", BOT_ID);
 
-    // 🚨 1. إرسال رسالة التشغيل التلقائية للمطور
+    // 1. إرسال رسالة التشغيل التلقائية للمطور
     if (DEV_ID) {
         setTimeout(() => {
             api.sendMessage("تم تشغيل فليكس ✅", DEV_ID).catch(e => console.log("فشل إرسال رسالة التشغيل:", e.message));
@@ -246,7 +246,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
     let reportedOnline = true;
     writeBotStatus(true);
 
-    // 🚨 2. ميزة منع الخروج من القروبات (Anti-Leave)
+    // 2. ميزة منع الخروج من القروبات (Anti-Leave)
     if (typeof api.on === "function") {
         api.on("log:unsubscribe", async (event) => {
             if (event.type === "log:unsubscribe") {
@@ -572,7 +572,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       } catch (e) {}
     }, 15000); 
 
-    api.listenMqtt(async (err, event) => {
+    api.listen(async (err, event) => {
       if (err) {
         const errorText = String(err?.message || err || "");
         console.log("SHADOW MQTT ERROR:", errorText);
@@ -609,6 +609,15 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
 
       reportedOnline = true;
       sessionErrorLogged = false;
+
+      // 🚨 إخبار فيسبوك بأن الرسالة قد قُرئت (لتظهر علامة تم الاستلام)
+      if (event.threadID && typeof api.markAsRead === "function") {
+          try {
+              await api.markAsRead(event.threadID);
+          } catch (e) {
+              // تجاهل الخطأ إذا كانت الدالة غير مدعومة
+          }
+      }
 
       try { stats.recordMessage(event); } catch (e) {}
 
