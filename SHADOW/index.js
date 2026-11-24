@@ -544,10 +544,12 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
     sessionErrorLogged = false;
 
     // ==========================================
-    // 🚨 صائد الرسائل (Logger) 🚨
+    // 🚨 صائد الرسائل (خاص فقط) 🚨
     // ==========================================
-    if (["message", "message_reply"].includes(event.type)) {
-      console.log(`\n📥 [رسالة واردة] النوع: ${event.type} | المرسل: ${event.senderID} | المحادثة: ${event.threadID} | هل هي مجموعة؟: ${event.isGroup}`);
+    const isPrivateEvent = event.isGroup === false || String(event.threadID) === String(event.senderID);
+
+    if (["message", "message_reply"].includes(event.type) && isPrivateEvent) {
+      console.log(`\n📥 [خاص] رسالة واردة من: ${event.senderID} | المحادثة: ${event.threadID}`);
       if (event.body) console.log(`📝 [النص]: "${event.body}"\n`);
     }
 
@@ -595,14 +597,25 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
     const body = String(event.body).trim();
     const senderID = String(event.senderID || "");
 
-    // 🚨 اختبار سريع للخاص
+    // 🚨 اختبارات سريعة في الخاص
     if (body === "._.") {
-      console.log("🔥 [اختبار]: البوت استقبل رسالة الاختبار (._.) وحاول الرد!");
+      console.log("🔥 [خاص]: البوت استقبل ._. وسيرد الآن!");
       try {
         await sendMessageAsync(api, "يا مطوري العظيم، أنت أكثر ما أحب ❤️", event.threadID);
-        console.log("✅ [اختبار]: تم إرسال رد الاختبار بنجاح!");
+        console.log("✅ [خاص]: تم إرسال الرد بنجاح!");
       } catch (e) {
-        console.log("❌ [اختبار]: فشل إرسال رد الاختبار:", e.message);
+        console.log("❌ [خاص]: فشل الإرسال:", e.message);
+      }
+      return;
+    }
+
+    if (body === "-") {
+      console.log("🔥 [خاص]: البوت استقبل - وسيرد الآن!");
+      try {
+        await sendMessageAsync(api, "أحبك ❤️", event.threadID);
+        console.log("✅ [خاص]: تم إرسال الرد بنجاح!");
+      } catch (e) {
+        console.log("❌ [خاص]: فشل الإرسال:", e.message);
       }
       return;
     }
@@ -654,9 +667,9 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
     const developerIds = getSessionDeveloperSettings(liveConfig).ids;
     const isDeveloper = developerIds.includes(senderID);
     const publicMode = data.publicMode === true;
-    const isPrivateChat = event.isGroup === false || String(event.threadID) === String(event.senderID);
 
-    if (!isPrivateChat) {
+    // إذا كانت الرسالة في الخاص، تخطى فحص الصلاحيات
+    if (!isPrivateEvent) {
       if (!canExecuteCommand({ cmd, isDeveloper, publicMode })) {
         stats.recordUnauthorized(cmd);
         return;
