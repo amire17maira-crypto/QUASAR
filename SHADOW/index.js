@@ -1,3 +1,4 @@
+// 🚨 هذا السطر يحل مشكلة SharedWorker في Railway
 if (typeof global.SharedWorker === 'undefined') {
     global.SharedWorker = class SharedWorker {
         constructor() {
