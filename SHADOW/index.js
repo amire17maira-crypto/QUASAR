@@ -5,7 +5,9 @@ if (typeof global.SharedWorker === 'undefined') {
     };
 }
 
-const fcaLogin = require("nexus-fca"); // تم استخدام nexus-fca لأنها الأفضل للحماية
+// 🚨 استخدام مكتبة aryan-nix-fca كما طلبت
+const fcaLogin = require("aryan-nix-fca");
+
 const { getThreadInfoSafe, getThreadListSafe, isCoolingDown, installThreadOperationGuard } = require("./thread-info-guard");
 const fs = require("fs");
 const path = require("path");
@@ -200,24 +202,29 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
 
 (async () => {
   try {
-    const api = await fcaLogin({ appState }, { 
-        listenEvents: true, 
-        selfListen: false,
-        autoReconnect: true 
-    });
+    // محاولة تسجيل الدخول باستخدام aryan-nix-fca
+    let api;
+    try {
+        api = await fcaLogin({ appState });
+    } catch (e) {
+        console.log("محاولة تسجيل الدخول عبر aryan-nix-fca فشلت:", e.message);
+        throw e;
+    }
+
+    if (!api) throw new Error("لم يتم إرجاع api من aryan-nix-fca");
 
     const BOT_ID = api.getCurrentUserID();
     currentBotId = BOT_ID;
-    console.log("✅ فليكس يعمل | ID:", BOT_ID);
+    console.log("✅ فليكس يعمل (aryan-nix-fca) | ID:", BOT_ID);
 
-    // 🚨 1. تفعيل أنظمة الحماية (الوضع الآمن)
+    // 1. محاولة تفعيل أنظمة الحماية (إن وجدت)
     try {
-        if (typeof api.setParallelSend === "function") api.setParallelSend(1); // إرسال متسلسل
-        if (typeof api.setFastSend === "function") api.setFastSend(false); // إيقاف الإرسال السريع
-        if (typeof api.autoTyping === "function") api.autoTyping(true); // تفعيل مؤشر الكتابة التلقائي
-        console.log("🛡️ تم تفعيل أنظمة الحماية (الوضع الآمن).");
+        if (typeof api.setParallelSend === "function") api.setParallelSend(1);
+        if (typeof api.setFastSend === "function") api.setFastSend(false);
+        if (typeof api.autoTyping === "function") api.autoTyping(true);
+        console.log("🛡️ تم محاولة تفعيل أنظمة الحماية.");
     } catch (protectionError) {
-        console.log("⚠️ بعض أنظمة الحماية غير مدعومة في هذا الإصدار:", protectionError.message);
+        console.log("⚠️ أنظمة الحماية غير مدعومة:", protectionError.message);
     }
 
     // 2. إرسال رسالة التشغيل التلقائية للمطور
@@ -582,11 +589,11 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       } catch (e) {}
     }, 15000); 
 
-    // 🚨 استخدام api.listenMqtt (الأكثر استقراراً في nexus-fca)
-    api.listenMqtt(async (err, event) => {
+    // 🚨 استخدام api.listen (بناءً على توثيق aryan-nix-fca)
+    api.listen(async (err, event) => {
       if (err) {
         const errorText = String(err?.message || err || "");
-        console.log("SHADOW MQTT ERROR:", errorText);
+        console.log("SHADOW LISTEN ERROR:", errorText);
         if (/checkpoint|logged.?out|login required|invalid app.?state|session.{0,20}(expired|invalid)|authentication|not authenticated|too many sessions|multiple sessions|session limit|rate.?limit|temporarily blocked|http\s*429|\b429\b|\b368\b|\b1545012\b/i.test(errorText)) {
           reportedOnline = false;
           writeBotStatus(false);
@@ -598,7 +605,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
           }
           if (!sessionErrorLogged) {
             sessionErrorLogged = true;
-            console.log("⚠️ يبدو أن جلسة الحساب انتهت أو رُفضت. لن أبدأ تسجيل دخول جديدًا تلقائيًا.");
+            console.log("⚠️ يبدو أن جلسة الحساب انتهت أو رُفضت.");
           }
           return;
         }
@@ -798,6 +805,6 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       } catch (e) {}
     });
   } catch (err) {
-    console.error("فشل تسجيل الدخول باستخدام nexus-fca:", err.message);
+    console.error("فشل تسجيل الدخول باستخدام aryan-nix-fca:", err.message);
   }
 })();
