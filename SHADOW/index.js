@@ -5,8 +5,7 @@ if (typeof global.SharedWorker === 'undefined') {
     };
 }
 
-// 🚨 استخدام مكتبة aryan-nix-fca
-const fcaLogin = require("aryan-nix-fca");
+const fcaLogin = require("nexus-fca"); // العودة إلى المكتبة الآمنة
 
 const { getThreadInfoSafe, getThreadListSafe, isCoolingDown, installThreadOperationGuard } = require("./thread-info-guard");
 const fs = require("fs");
@@ -102,20 +101,7 @@ const config = {
 
 http.createServer((req, res) => res.end("ok")).listen(PORT, "127.0.0.1");
 
-// 🚨 تحميل appState مع التحقق
-let appState = null;
-try {
-    const rawState = fs.readFileSync(SESSION_FILE, "utf8");
-    appState = JSON.parse(rawState);
-    if (!appState || (Array.isArray(appState) && appState.length === 0)) {
-        throw new Error("ملف appState فارغ أو غير صالح.");
-    }
-    console.log("✅ تم تحميل appState بنجاح. عدد الكوكيز:", Array.isArray(appState) ? appState.length : "غير معروف");
-} catch (e) {
-    console.error("❌ فشل تحميل appState:", e.message);
-    console.error("تأكد من وجود ملف appState.json صالح في المجلد الرئيسي.");
-    process.exit(1); // إيقاف البوت لأن الجلسة ضرورية
-}
+const appState = JSON.parse(fs.readFileSync(SESSION_FILE, "utf8"));
 
 function loadData() {
   try {
@@ -215,33 +201,24 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
 
 (async () => {
   try {
-    // 🚨 محاولة تسجيل الدخول باستخدام aryan-nix-fca مع تمرير appState بشكل صحيح
-    console.log("⏳ محاولة تسجيل الدخول عبر aryan-nix-fca...");
-    let api;
-    try {
-        // نمرر appState كخاصية داخل الكائن، مع التأكد من أنه ليس null
-        api = await fcaLogin({ appState: appState });
-    } catch (e) {
-        console.error("❌ فشل تسجيل الدخول عبر aryan-nix-fca:", e.message);
-        throw e;
-    }
-
-    if (!api || typeof api.getCurrentUserID !== "function") {
-        throw new Error("لم يتم إرجاع api صالح من aryan-nix-fca. تحقق من صحة appState.");
-    }
+    const api = await fcaLogin({ appState }, { 
+        listenEvents: true, 
+        selfListen: false,
+        autoReconnect: true 
+    });
 
     const BOT_ID = api.getCurrentUserID();
     currentBotId = BOT_ID;
-    console.log("✅ فليكس يعمل (aryan-nix-fca) | ID:", BOT_ID);
+    console.log("✅ فليكس يعمل | ID:", BOT_ID);
 
-    // 1. محاولة تفعيل أنظمة الحماية (إن وجدت)
+    // 🚨 1. تفعيل أنظمة الحماية (الوضع الآمن)
     try {
         if (typeof api.setParallelSend === "function") api.setParallelSend(1);
         if (typeof api.setFastSend === "function") api.setFastSend(false);
         if (typeof api.autoTyping === "function") api.autoTyping(true);
-        console.log("🛡️ تم محاولة تفعيل أنظمة الحماية.");
+        console.log("🛡️ تم تفعيل أنظمة الحماية (الوضع الآمن).");
     } catch (protectionError) {
-        console.log("⚠️ أنظمة الحماية غير مدعومة:", protectionError.message);
+        console.log("⚠️ بعض أنظمة الحماية غير مدعومة في هذا الإصدار:", protectionError.message);
     }
 
     // 2. إرسال رسالة التشغيل التلقائية للمطور
@@ -606,11 +583,11 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       } catch (e) {}
     }, 15000); 
 
-    // 🚨 استخدام api.listen (بناءً على توثيق aryan-nix-fca)
-    api.listen(async (err, event) => {
+    // 🚨 استخدام api.listenMqtt (الأكثر استقراراً في nexus-fca)
+    api.listenMqtt(async (err, event) => {
       if (err) {
         const errorText = String(err?.message || err || "");
-        console.log("SHADOW LISTEN ERROR:", errorText);
+        console.log("SHADOW MQTT ERROR:", errorText);
         if (/checkpoint|logged.?out|login required|invalid app.?state|session.{0,20}(expired|invalid)|authentication|not authenticated|too many sessions|multiple sessions|session limit|rate.?limit|temporarily blocked|http\s*429|\b429\b|\b368\b|\b1545012\b/i.test(errorText)) {
           reportedOnline = false;
           writeBotStatus(false);
@@ -622,7 +599,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
           }
           if (!sessionErrorLogged) {
             sessionErrorLogged = true;
-            console.log("⚠️ يبدو أن جلسة الحساب انتهت أو رُفضت.");
+            console.log("⚠️ يبدو أن جلسة الحساب انتهت أو رُفضت. لن أبدأ تسجيل دخول جديدًا تلقائيًا.");
           }
           return;
         }
@@ -822,6 +799,6 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       } catch (e) {}
     });
   } catch (err) {
-    console.error("فشل تسجيل الدخول باستخدام aryan-nix-fca:", err.message);
+    console.error("فشل تسجيل الدخول باستخدام nexus-fca:", err.message);
   }
 })();
