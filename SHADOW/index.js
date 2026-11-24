@@ -678,7 +678,7 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
         await messageActivity.record(event, (threadID, messageEvent) => {
           const sender = String(messageEvent.senderID || "");
           if (!sender || sender === String(BOT_ID)) return false;
-          if (messageEvent.isGroup === false) return false;
+          // تم إزالة السطر الذي كان يمنع الخاص
           return threadID !== sender;
         });
       } catch (activityError) {
