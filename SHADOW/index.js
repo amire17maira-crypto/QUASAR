@@ -214,14 +214,11 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
     }
   });
 
-
-  // Adapt the new FCA method names to the legacy SHADOW command surface.
   const fcaCompat = require("./fca-compat")(api);
   console.log("[FCA COMPAT] Installed:", fcaCompat.installed.join(", ") || "native methods");
 
   installThreadOperationGuard(api);
 
-  // Restore saved nickname protections for this session
   const nicknameCommand = commands["كنيات"];
   if (nicknameCommand && typeof nicknameCommand.restoreProtection === "function") {
     const savedNicknameProtections = loadData().nicknameProtections || {};
@@ -236,8 +233,6 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
   let reportedOnline = true;
   writeBotStatus(true);
 
-  // The replacement library emits explicit account/session restriction events.
-  // Never attempt an extra login when Facebook requests a checkpoint or blocks login.
   if (typeof api.on === "function") {
     const restrictedEvents = ["checkpoint", "checkpoint_282", "checkpoint_956", "loginBlocked", "sessionExpired", "account_inactive"];
     for (const eventName of restrictedEvents) {
@@ -262,7 +257,6 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
 
   const _origSend = api.sendMessage.bind(api);
 
-  // Support legacy callbacks and Promise-returning FCA calls.
   api.sendMessage = (msg, threadID, third, fourth) => {
     const legacyCallback = typeof third === "function" ? third : null;
     const callback = legacyCallback ||
@@ -322,7 +316,6 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
     });
   }
 
-  // ===== SHADOW BOT NICKNAME GUARD =====
   let nicknameCheckRunning = false;
 
   let discoverGroupsRunning = false;
@@ -431,8 +424,6 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
 
           const groupNickname = loadData().nicknameProtections?.[id];
           for (const target of targets) {
-            // A group-wide nickname command takes precedence over the developer's
-            // normal nickname guard in that one group; it resumes after !كنيات off.
             if (target.label === "المطور" && typeof groupNickname === "string" && groupNickname.trim()) {
               continue;
             }
@@ -456,7 +447,6 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
     }
   }
 
-  // ===== SHADOW GROUP NAME GUARD =====
   let groupNameCheckRunning = false;
   const groupNameLastAttempt = new Map();
 
@@ -507,7 +497,6 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
           try {
             await api.gcname(wanted, id);
           } catch {
-            // استرجاع صامت؛ ستتم المحاولة مجددًا بعد المهلة.
           }
         }
       }
@@ -523,10 +512,8 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
   checkSavedGroupNames();
   setInterval(checkSavedGroupNames, 30000);
 
-  // تحديث قائمة القروبات دورياً لاكتشاف القروبات الجديدة
   setInterval(discoverBotGroups, 300000);
 
-  // استقبال طلب تحديث فوري من لوحة التحكم لهذه الجلسة فقط.
   let refreshSignalRunning = false;
   let refreshSignalRetryAt = 0;
 
@@ -583,7 +570,6 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
   if (typeof refreshSignalTimer.unref === "function") refreshSignalTimer.unref();
 
   let sessionErrorLogged = false;
-  // Group-name and member-nickname protection events require listenEvents.
   try {
     if (typeof api.setOptions === "function") api.setOptions({ listenEvents: true });
   } catch (eventOptionsError) {
@@ -635,15 +621,12 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
     try { stats.recordMessage(event); }
     catch (e) { console.log("خطأ في تسجيل الإحصائيات:", e.message); }
 
-    // إيقاف جميع أحداث القروبات المكتومة قبل تشغيل أي معالج
     const eventThreadID = String(event.threadID || "");
     if (eventThreadID) {
       const currentData = loadData();
       if (currentData.mutedGroups?.[eventThreadID] === true) return;
     }
 
-    // لا تشغّل أحداث الترحيب/الدخول عندما يكون البوت نفسه هو العضو المضاف.
-    // بقية أحداث المجموعة والأعضاء تستمر بشكل طبيعي.
     const addedParticipants = event.logMessageData?.addedParticipants;
     const botWasAdded = event.logMessageType === "log:subscribe" &&
       Array.isArray(addedParticipants) &&
@@ -652,7 +635,6 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
       ) === String(BOT_ID));
 
     if (botWasAdded) {
-      // شغّل معالج join فقط لتسجيل المجموعة وضبط الكنيات، بلا رسائل ترحيب.
       try {
         if (typeof events.join === "function") {
           events.join(api, event, config, loadData, saveData, automicTimers, BOT_ID, startTime);
@@ -673,12 +655,13 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
       }
     }
 
+    // 🌟 تعديل: إزالة شرط الحظر من messageActivity
     if (["message", "message_reply"].includes(event.type)) {
       try {
         await messageActivity.record(event, (threadID, messageEvent) => {
           const sender = String(messageEvent.senderID || "");
           if (!sender || sender === String(BOT_ID)) return false;
-          // تم إزالة السطر الذي كان يمنع الخاص
+          // ✅ تم إزالة سطر الحظر هنا (isGroup === false) ليعمل في الخاص
           return threadID !== sender;
         });
       } catch (activityError) {
@@ -701,7 +684,6 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
     const body = String(event.body).trim();
     const senderID = String(event.senderID || "");
 
-    // Developer-only special messages
     const developerIdsForReactions = new Set(
       [...(Array.isArray(config.DEV_IDS) ? config.DEV_IDS : []), config.DEV_ID]
         .filter(Boolean)
@@ -796,7 +778,7 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
 
     const publicMode = data.publicMode === true;
 
-    // 🌟 التعديل الجديد: السماح بكل الأوامر في الخاص بدون حظر
+    // 🌟 تعديل جديد: تخطي فحص الصلاحيات في الخاص
     const isPrivateChat = event.isGroup === false || String(event.threadID) === String(event.senderID);
 
     if (!isPrivateChat) {
@@ -812,8 +794,6 @@ fcaLogin({ appState }, { listenEvents: true, selfListen: false }, (err, api) => 
           duration: 3000,
           autoStop: true
         });
-      } else {
-        console.log("مؤشر الكتابة غير متاح في API.");
       }
     } catch (typingError) {
       console.log("تعذر إظهار مؤشر الكتابة:", typingError?.message || typingError);
