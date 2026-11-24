@@ -210,7 +210,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
     currentBotId = BOT_ID;
     console.log("✅ فليكس يعمل | ID:", BOT_ID);
 
-    // 1. إرسال رسالة تشغيل تلقائية للمطور
+    // 🚨 1. إرسال رسالة التشغيل التلقائية للمطور
     if (DEV_ID) {
         setTimeout(() => {
             api.sendMessage("تم تشغيل فليكس ✅", DEV_ID).catch(e => console.log("فشل إرسال رسالة التشغيل:", e.message));
@@ -246,7 +246,24 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
     let reportedOnline = true;
     writeBotStatus(true);
 
+    // 🚨 2. ميزة منع الخروج من القروبات (Anti-Leave)
     if (typeof api.on === "function") {
+        api.on("log:unsubscribe", async (event) => {
+            if (event.type === "log:unsubscribe") {
+                 const data = loadData();
+                 if (data.antiLeave === false) return;
+                 const leftID = event.logMessageData?.leftParticipantFbId;
+                 if (leftID && String(leftID) !== String(BOT_ID)) {
+                     try {
+                         await api.addUserToGroup(leftID, event.threadID);
+                         await api.sendMessage(`⚠️ تم إعادة العضو الذي حاول الخروج.`, event.threadID);
+                     } catch (e) {
+                         console.log("فشل إعادة العضو:", e.message);
+                     }
+                 }
+            }
+        });
+
       const restrictedEvents = ["checkpoint", "checkpoint_282", "checkpoint_956", "loginBlocked", "sessionExpired", "account_inactive"];
       for (const eventName of restrictedEvents) {
         api.on(eventName, details => {
@@ -639,13 +656,13 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
 
       const isDev = DEV_IDS.includes(senderID) || String(senderID) === String(DEV_ID);
       
-      // 🚨 1. ميزة كلمة "فليكس" للمطور فقط (في الخاص والقروب)
+      // 🚨 3. ميزة كلمة "فليكس" (للمطور فقط)
       if (isDev && body.toLowerCase() === "فليكس") {
           await api.sendMessage("شني", event.threadID).catch(()=>{});
           return;
       }
 
-      // 🚨 2. ميزة إرسال رسالة خاصة بالـ ID (للمطور فقط)
+      // 🚨 4. ميزة إرسال رسالة خاصة بالـ ID (للمطور فقط)
       if (isDev && body.startsWith("ارسل ")) {
           const parts = body.split(" ");
           if (parts.length >= 3) {
@@ -659,21 +676,6 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
               }
           } else {
               await api.sendMessage("الاستخدام: ارسل [ID] [الرسالة]", event.threadID);
-          }
-          return;
-      }
-
-      // 🚨 3. ميزة منع الخروج من القروب (Anti-Leave)
-      if (event.logMessageType === "log:unsubscribe") {
-          if (data.antiLeave === false) return; 
-          const leftID = event.logMessageData?.leftParticipantFbId;
-          if (leftID && String(leftID) !== String(BOT_ID)) {
-              try {
-                  await api.addUserToGroup(leftID, event.threadID);
-                  await api.sendMessage(`⚠️ تم إعادة العضو الذي حاول الخروج.`, event.threadID);
-              } catch (e) {
-                  console.log("فشل إعادة العضو للقروب:", e.message);
-              }
           }
           return;
       }
@@ -741,459 +743,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
 
       const isPrivateEvent = event.isGroup === false || String(event.threadID) === String(event.senderID);
       
-      // 🚨 4. الرد على الأوامر في الخاص (حتى لو لم يكن المطور، لكن الأوامر ستكون متاحة حسب صلاحياتها)
-      if (isPrivateEvent) {
-          // في الخاص نتجاهل شرط الـ publicMode وننفذ الأمر
-      } else {
-        if (!canExecuteCommand({ cmd, isDeveloper, publicMode })) {
-          stats.recordUnauthorized(cmd);
-          return;
-        }
-      }
-
-      try {
-        if (typeof api.sendTypingIndicator === "function") await api.sendTypingIndicator(String(event.threadID), true, { duration: 3000, autoStop: true });
-      } catch (typingError) {}
-
-      await new Promise(resolve => setTimeout(resolve, 3000));
-
-      if (hasCustomCommand) {
-        try {
-          if (typeof customCommand.code === "string" && customCommand.code.trim()) {
-            const customFn = new Function("return (" + customCommand.code + ")")();
-            if (typeof customFn !== "function") throw new Error("كود الأمر يجب أن يكون دالة JavaScript");
-            const result = customFn(api, event, args, startTime, loadData, saveData, automicTimers, config, hostingInfo, botSentMessages, BOT_ID);
-            if (result?.catch) result.catch(e => {});
-          } else if (typeof customCommand.reply === "string") {
-            api.sendMessage(customCommand.reply, event.threadID);
-          }
-        } catch (e) {}
-        return;
-      }
-
-      try {
-        const result = commands[cmd](api, event, args, startTime, loadData, saveData, automicTimers, config, hostingInfo, botSentMessages, BOT_ID, Object.keys(commands), Object.keys(customCommands).filter(name => !commands[name] && customCommands[name] && customCommands[name].enabled === true), commands, { isDeveloper });
-        if (result?.catch) result.catch(e => {});
-      } catch (e) {}
-    });
-  } catch (err) {
-    console.error("فشل تسجيل الدخول باستخدام nexus-fca:", err.message);
-  }
-})();(info => {
-        if (info?.messageID) trackMsg(String(threadID), info.messageID);
-        if (callback) callback(null, info);
-        return info;
-      }, error => {
-        if (callback) {
-          callback(error);
-          return undefined;
-        }
-        throw error;
-      });
-    };
-
-    const hostingInfo = { platform: os.platform(), arch: os.arch(), node: process.version };
-
-    async function setNicknameCompat(nickname, threadID, userID) {
-      const method = [api.nickname, api.changeNickname, api.setNickname]
-        .find(fn => typeof fn === "function");
-      if (!method) throw new Error("دالة تغيير الكنية غير متاحة في FCA");
-      return new Promise((resolve, reject) => {
-        let settled = false;
-        let timeout = null;
-        const done = error => {
-          if (settled) return;
-          settled = true;
-          if (timeout) clearTimeout(timeout);
-          if (error) reject(error);
-          else resolve();
-        };
-        timeout = setTimeout(() => done(new Error("انتهت مهلة تغيير الكنية بعد 30 ثانية")), 30000);
-        try {
-          const result = method.call(api, nickname, String(threadID), String(userID), done);
-          if (result && typeof result.then === "function") result.then(() => done(), done);
-          else if (method.length < 4) done();
-        } catch (error) {
-          done(error);
-        }
-      });
-    }
-
-    let nicknameCheckRunning = false;
-    let discoverGroupsRunning = false;
-    
-    async function discoverBotGroups() {
-      if (discoverGroupsRunning) return false;
-      discoverGroupsRunning = true;
-      try {
-        const data = loadData();
-        data.botGroups = Array.isArray(data.botGroups) ? data.botGroups : [];
-        const known = new Map(data.botGroups.map(g => [String(g.id), g]));
-        let cursor = null;
-
-        for (let page = 0; page < 25; page++) {
-          const list = await getThreadListSafe(api, 100, cursor, ["INBOX", "ARCHIVED"]);
-          if (!Array.isArray(list) || !list.length) break;
-
-          for (const thread of list) {
-            if (!thread || !thread.isGroup || !thread.threadID) continue;
-            const id = String(thread.threadID);
-            known.set(id, { id, name: thread.threadName || id });
-          }
-
-          if (list.length < 100) break;
-          const next = Number(list[list.length - 1].timestamp);
-          if (!Number.isSafeInteger(next) || next <= 0 || next === cursor) break;
-          cursor = next;
-        }
-
-        data.botGroups = [...known.values()];
-        data.groupsUpdatedAt = new Date().toISOString();
-        saveData(data);
-        console.log("تم تحديث قروبات البوت:", data.botGroups.length);
-        return true;
-      } catch (e) {
-        console.log("تعذر اكتشاف القروبات:", e.message);
-        return false;
-      } finally {
-        discoverGroupsRunning = false;
-      }
-    }
-
-    async function checkBotNicknames() {
-      if (nicknameCheckRunning) return;
-      nicknameCheckRunning = true;
-
-      try {
-        let latest = {};
-        try {
-          latest = JSON.parse(fs.readFileSync(path.join(DATA_DIR, "config.json"), "utf8"));
-        } catch {}
-
-        const latestSession = latest.SESSIONS?.[SESSION_ID] || {};
-        const legacyConfig = SESSION_ID === "1" ? latest : {};
-
-        config.BOT_NICK = String(latestSession.BOT_NICK || latest.BOT_NICK || config.BOT_NICK);
-        config.DEV_NICK = String(latestSession.DEV_NICK || legacyConfig.DEV_NICK || config.DEV_NICK);
-        config.NICK_GUARD_ENABLED = (latestSession.NICK_GUARD_ENABLED ?? latest.NICK_GUARD_ENABLED) !== false;
-        config.DEV_NICK_GUARD_ENABLED = (
-          latestSession.DEV_NICK_GUARD_ENABLED ??
-          legacyConfig.DEV_NICK_GUARD_ENABLED
-        ) !== false;
-
-        const developerSettings = getSessionDeveloperSettings(latest);
-        config.DEV_ID = developerSettings.id;
-        config.DEV_IDS = developerSettings.ids;
-
-        const targets = [
-          ...(config.NICK_GUARD_ENABLED ? [{ id: String(BOT_ID), nickname: config.BOT_NICK, label: "البوت" }] : []),
-          ...(config.DEV_NICK_GUARD_ENABLED ? config.DEV_IDS.filter(id => id !== String(BOT_ID)).map(id => ({ id, nickname: config.DEV_NICK, label: "المطور" })) : [])
-        ].filter(target => target.nickname && target.nickname.trim());
-
-        if (!targets.length) return;
-
-        const data = loadData();
-        const ids = [...new Set([
-          ...(Array.isArray(data.botGroups) ? data.botGroups.map(g => g && g.id) : []),
-          ...Object.keys(data.protected || {}),
-          ...Object.keys(data.nicknameProtections || {})
-        ].map(id => String(id || "")).filter(Boolean))];
-
-        for (let i = 0; i < ids.length; i += 20) {
-          const batch = ids.slice(i, i + 20);
-          let infos;
-          try { infos = await getThreadInfoSafe(api, batch); } 
-          catch (e) { if (isCoolingDown(api)) break; continue; }
-
-          for (const id of batch) {
-            const info = infos && infos[id];
-            if (!info) continue;
-            const nicknames = info.nicknames || info.customNicknames || {};
-            const groupNickname = loadData().nicknameProtections?.[id];
-
-            for (const target of targets) {
-              if (target.label === "المطور" && typeof groupNickname === "string" && groupNickname.trim()) continue;
-              const current = nicknames[target.id] || "";
-              if (current !== target.nickname) {
-                try {
-                  await setNicknameCompat(target.nickname, id, target.id);
-                  await new Promise(resolve => setTimeout(resolve, 250));
-                } catch (e) {}
-              }
-            }
-          }
-        }
-      } finally {
-        nicknameCheckRunning = false;
-      }
-    }
-
-    let groupNameCheckRunning = false;
-    const groupNameLastAttempt = new Map();
-
-    async function checkSavedGroupNames() {
-      if (groupNameCheckRunning) return;
-      groupNameCheckRunning = true;
-      try {
-        const data = loadData();
-        const saved = data.savedGroupNames || {};
-        const ids = Object.keys(saved).filter(id => typeof saved[id] === "string" && saved[id].trim());
-
-        for (let i = 0; i < ids.length; i += 20) {
-          const batch = ids.slice(i, i + 20);
-          let infos;
-          try { infos = await getThreadInfoSafe(api, batch); } 
-          catch (e) { if (isCoolingDown(api)) break; continue; }
-
-          for (const id of batch) {
-            const latest = loadData().savedGroupNames || {};
-            const wanted = latest[id];
-            if (typeof wanted !== "string" || !wanted.trim()) continue;
-
-            const info = infos && infos[id];
-            if (!info) continue;
-
-            const current = info.threadName || info.name || "";
-            if (current === wanted) continue;
-
-            const now = Date.now();
-            const last = groupNameLastAttempt.get(id) || 0;
-            if (now - last < 30000) continue;
-            groupNameLastAttempt.set(id, now);
-
-            try { await api.gcname(wanted, id); } catch {}
-          }
-        }
-      } catch (e) {} finally { groupNameCheckRunning = false; }
-    }
-
-    discoverBotGroups().then(checkBotNicknames);
-    setInterval(checkBotNicknames, 7000);
-    checkSavedGroupNames();
-    setInterval(checkSavedGroupNames, 30000);
-    setInterval(discoverBotGroups, 300000);
-
-    let refreshSignalRunning = false;
-    let refreshSignalRetryAt = 0;
-
-    async function processGroupRefreshSignal() {
-      if (refreshSignalRunning || discoverGroupsRunning || nicknameCheckRunning || groupNameCheckRunning || Date.now() < refreshSignalRetryAt || !fs.existsSync(GROUP_REFRESH_SIGNAL_FILE)) return;
-      refreshSignalRunning = true;
-      let signalClaimed = false;
-
-      try {
-        try { fs.unlinkSync(GROUP_REFRESH_SIGNAL_FILE); signalClaimed = true; } 
-        catch (e) { if (e.code === "ENOENT") return; throw e; }
-
-        const updated = await discoverBotGroups();
-        if (!updated) {
-          fs.writeFileSync(GROUP_REFRESH_SIGNAL_FILE, "retry");
-          signalClaimed = false;
-          refreshSignalRetryAt = Date.now() + 30000;
-          return;
-        }
-      } catch (e) {
-        if (signalClaimed) { try { fs.writeFileSync(GROUP_REFRESH_SIGNAL_FILE, "retry"); } catch (restoreError) {} }
-        refreshSignalRetryAt = Date.now() + 30000;
-      } finally {
-        refreshSignalRunning = false;
-      }
-    }
-    
-    const refreshSignalTimer = setInterval(() => { processGroupRefreshSignal().catch(e => {}); }, 1200);
-    if (typeof refreshSignalTimer.unref === "function") refreshSignalTimer.unref();
-
-    let sessionErrorLogged = false;
-    try { if (typeof api.setOptions === "function") api.setOptions({ listenEvents: true }); } catch (eventOptionsError) {}
-
-    // 🚨 بدء الفحص الدوري للرسائل الخاصة (Polling) 🚨
-    let lastPrivateCheck = Date.now();
-    
-    setInterval(async () => {
-      try {
-        const threads = await api.getThreadList(10, null, ["INBOX"]);
-        
-        for (const thread of threads) {
-          if (!thread.isGroup && thread.timestamp > lastPrivateCheck && thread.unreadCount > 0) {
-            
-            const history = await api.getThreadHistory(thread.threadID, 5);
-            for (const msg of history) {
-              if (msg.senderID !== BOT_ID && msg.timestamp > lastPrivateCheck) {
-                
-                const isDev = DEV_IDS.includes(String(msg.senderID)) || String(msg.senderID) === String(DEV_ID);
-                
-                if (isDev) {
-                  console.log(`\n📥 [خاص - مطور]: رسالة جديدة من: ${msg.senderID}`);
-                  console.log(`📝 [النص]: "${msg.body}"`);
-                  
-                  const body = String(msg.body || "").trim();
-                  
-                  if (body === "-") {
-                    await api.sendMessage("أحبك ❤️", msg.threadID);
-                    console.log("✅ [خاص]: تم الرد على '-'");
-                  } 
-                  else if (body === "._.") {
-                    await api.sendMessage("يا مطوري العظيم، أنت أكثر ما أحب ❤️", msg.threadID);
-                    console.log("✅ [خاص]: تم الرد على '._.'");
-                  }
-                  else if (body.includes("منو عمك")) {
-                    await api.sendMessage("هتلر مع علم ألمانيا 🇩🇪", msg.threadID);
-                    console.log("✅ [خاص]: تم الرد على 'منو عمك'");
-                  }
-                }
-              }
-            }
-            lastPrivateCheck = Math.max(lastPrivateCheck, thread.timestamp);
-          }
-        }
-      } catch (e) {}
-    }, 15000); 
-
-    api.listenMqtt(async (err, event) => {
-      if (err) {
-        const errorText = String(err?.message || err || "");
-        console.log("SHADOW MQTT ERROR:", errorText);
-        if (/checkpoint|logged.?out|login required|invalid app.?state|session.{0,20}(expired|invalid)|authentication|not authenticated|too many sessions|multiple sessions|session limit|rate.?limit|temporarily blocked|http\s*429|\b429\b|\b368\b|\b1545012\b/i.test(errorText)) {
-          reportedOnline = false;
-          writeBotStatus(false);
-          for (const [timerKey, timerValue] of Object.entries(automicTimers)) {
-            if (["shadow-atomic", "shadow-engines"].includes(timerValue?.kind) && typeof timerValue.stop === "function") {
-              timerValue.stop();
-              delete automicTimers[timerKey];
-            }
-          }
-          if (!sessionErrorLogged) {
-            sessionErrorLogged = true;
-            console.log("⚠️ يبدو أن جلسة الحساب انتهت أو رُفضت. لن أبدأ تسجيل دخول جديدًا تلقائيًا.");
-          }
-          return;
-        }
-        return;
-      }
-      if (!event) return;
-
-      if (["account_inactive", "stop_listen"].includes(String(event.type || ""))) {
-        reportedOnline = false;
-        writeBotStatus(false);
-        for (const [timerKey, timerValue] of Object.entries(automicTimers)) {
-          if (["shadow-atomic", "shadow-engines"].includes(timerValue?.kind) && typeof timerValue.stop === "function") {
-            timerValue.stop();
-            delete automicTimers[timerKey];
-          }
-        }
-        return;
-      }
-
-      reportedOnline = true;
-      sessionErrorLogged = false;
-
-      try { stats.recordMessage(event); } catch (e) {}
-
-      const eventThreadID = String(event.threadID || "");
-      if (eventThreadID) {
-        const currentData = loadData();
-        if (currentData.mutedGroups?.[eventThreadID] === true) return;
-      }
-
-      const addedParticipants = event.logMessageData?.addedParticipants;
-      const botWasAdded = event.logMessageType === "log:subscribe" &&
-        Array.isArray(addedParticipants) &&
-        addedParticipants.some(person => String(person?.userFbId ?? person?.userID ?? person?.id ?? "") === String(BOT_ID));
-
-      if (botWasAdded) {
-        try {
-          if (typeof events.join === "function") events.join(api, event, config, loadData, saveData, automicTimers, BOT_ID, startTime);
-        } catch (eventError) {}
-      } else {
-        for (const e in events) {
-          try { events[e](api, event, config, loadData, saveData, automicTimers, BOT_ID, startTime); } catch (eventError) {}
-        }
-      }
-
-      if (["message", "message_reply"].includes(event.type)) {
-        try {
-          await messageActivity.record(event, (threadID, messageEvent) => {
-            const sender = String(messageEvent.senderID || "");
-            if (!sender || sender === String(BOT_ID)) return false;
-            return threadID !== sender;
-          });
-        } catch (activityError) {}
-      }
-
-      if (event.body && ["message", "message_reply"].includes(event.type)) {
-        try { autoDownload(api, event, BOT_ID); } catch (downloadError) {}
-      }
-
-      if (!event.body || !["message", "message_reply"].includes(event.type)) return;
-
-      const data = loadData() || {};
-      const PREFIX = data.prefix || "!";
-      const body = String(event.body).trim();
-      const senderID = String(event.senderID || "");
-
-      const isDev = DEV_IDS.includes(senderID) || String(senderID) === String(DEV_ID);
-      
-      if (isDev) {
-        if (body === "-") {
-          try { await sendMessageAsync(api, "أحبك ❤️", event.threadID); } catch (e) {}
-          return;
-        }
-
-        if (body.includes("منو عمك")) {
-          try { await sendMessageAsync(api, "هتلر مع علم ألمانيا 🇩🇪", event.threadID); } catch (e) {}
-          return;
-        }
-      }
-
-      const developerIdsForReactions = new Set([...(Array.isArray(config.DEV_IDS) ? config.DEV_IDS : []), config.DEV_ID].filter(Boolean).map(String));
-
-      if (developerIdsForReactions.has(senderID)) {
-        if (body === "مح") {
-          try {
-            if (event.messageID && typeof api.setMessageReactionMqtt === "function") {
-              await api.setMessageReactionMqtt("❤️", String(event.messageID), String(event.threadID));
-            }
-          } catch (e) {}
-          return;
-        }
-      }
-
-      let cmd = null, args = [];
-      if (body.startsWith(PREFIX)) {
-        args = body.slice(PREFIX.length).trim().split(/\s+/);
-        cmd = args[0].toLowerCase();
-      } else if (data.freePrefix) {
-        args = body.trim().split(/\s+/);
-        cmd = args[0].toLowerCase();
-      }
-
-      const rawCommandLine = body.startsWith(PREFIX) ? body.slice(PREFIX.length) : body;
-      const rawCommandMatch = rawCommandLine.match(/^\s*\S+(?:\s+([\s\S]*))?$/);
-      args.rawText = rawCommandMatch ? (rawCommandMatch[1] || "") : "";
-
-      if (!cmd) return;
-
-      let customCommands = {};
-      try {
-        customCommands = JSON.parse(fs.readFileSync(CUSTOM_COMMANDS_FILE, "utf8"));
-        if (!customCommands || typeof customCommands !== "object" || Array.isArray(customCommands)) customCommands = {};
-      } catch {}
-
-      const customCommand = customCommands[cmd];
-      const hasCustomCommand = !commands[cmd] && customCommand && customCommand.enabled === true && (typeof customCommand.code === "string" || typeof customCommand.reply === "string");
-
-      if (!commands[cmd] && !hasCustomCommand) return;
-
-      stats.recordCommand(cmd, senderID, event.threadID);
-      
-      let liveConfig = {};
-      try { liveConfig = JSON.parse(fs.readFileSync(path.join(DATA_DIR, "config.json"), "utf8")); } catch { liveConfig = config; }
-
-      const developerIds = getSessionDeveloperSettings(liveConfig).ids;
-      const isDeveloper = developerIds.includes(senderID);
-      const publicMode = data.publicMode === true;
-
-      const isPrivateEvent = event.isGroup === false || String(event.threadID) === String(event.senderID);
+      // 🚨 5. الاستجابة للأوامر في الخاص
       if (!isPrivateEvent) {
         if (!canExecuteCommand({ cmd, isDeveloper, publicMode })) {
           stats.recordUnauthorized(cmd);
