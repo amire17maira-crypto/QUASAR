@@ -85,18 +85,21 @@ const developerSettings = getSessionDeveloperSettings(savedConfig);
 const DEV_ID = developerSettings.id;
 const DEV_IDS = developerSettings.ids;
 
+const DEFAULT_BOT_NICK = "𝐅̷̸̳̿𝐄̷̸̴̸̵̴̶̵̺̱̰𝐋̷̸̧̰̦̰𝐈̷̸̚𝐗̷̸̳̿ 🇩🇪";
+const DEFAULT_DEV_NICK = "𝗘𝗱𝘄𝗶𝗻 🪽";
+
 const config = {
   BOT_NAME: "فليكس",
-  BOT_NICK: String(sessionConfig.BOT_NICK || savedConfig.BOT_NICK || "𝚀𝚄𝙰𝚂𝙰𝚁 ⦓ ⚛️ ⦔"),
+  BOT_NICK: String(sessionConfig.BOT_NICK || savedConfig.BOT_NICK || DEFAULT_BOT_NICK),
   NICK_GUARD_ENABLED: (sessionConfig.NICK_GUARD_ENABLED ?? savedConfig.NICK_GUARD_ENABLED) !== false,
   DEV_ID,
   DEV_IDS,
-  DEV_NICK: String(sessionConfig.DEV_NICK || (SESSION_ID === "1" ? savedConfig.DEV_NICK : "") || "𝚂𝙷𝙰𝙳𝙾𝚆 ⦓ ⚛️ ⦔"),
+  DEV_NICK: String(sessionConfig.DEV_NICK || (SESSION_ID === "1" ? savedConfig.DEV_NICK : "") || DEFAULT_DEV_NICK),
   DEV_NICK_GUARD_ENABLED: (
     sessionConfig.DEV_NICK_GUARD_ENABLED ??
     (SESSION_ID === "1" ? savedConfig.DEV_NICK_GUARD_ENABLED : undefined)
   ) !== false,
-  DEV_NAME: "SHADOW"
+  DEV_NAME: "Edwin"
 };
 
 http.createServer((req, res) => res.end("ok")).listen(PORT, "127.0.0.1");
@@ -145,6 +148,26 @@ const botSentMessages = {};
 const startTime = Date.now();
 let currentBotId = null;
 
+// طابور إرسال معزول لكل محادثة/مجموعة لمنع تكرار الرسائل في مجموعة من تعطيل باقي المجموعات
+const threadSendQueues = new Map();
+
+function enqueueThreadSend(threadKey, taskFn) {
+  const key = String(threadKey || "default");
+  const prev = threadSendQueues.get(key) || Promise.resolve();
+  const next = prev
+    .catch(() => {})
+    .then(() => taskFn());
+
+  threadSendQueues.set(key, next);
+  next.finally(() => {
+    if (threadSendQueues.get(key) === next) {
+      threadSendQueues.delete(key);
+    }
+  });
+
+  return next;
+}
+
 function writeBotStatus(online) {
   try {
     fs.writeFileSync(STATUS_FILE, JSON.stringify({
@@ -168,7 +191,8 @@ function trackMsg(threadID, msgID) {
 }
 
 function sendMessageAsync(api, message, threadID, replyToMessageID) {
-  return new Promise((resolve, reject) => {
+  const targetKey = String(threadID || "");
+  return enqueueThreadSend(targetKey, () => new Promise((resolve, reject) => {
     let settled = false;
     const timeout = setTimeout(
       () => finish(new Error("انتهت مهلة إرسال الرسالة بعد 30 ثانية")),
@@ -186,7 +210,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
     try {
       const result = api.sendMessage(
         message,
-        String(threadID),
+        targetKey,
         replyToMessageID == null ? undefined : String(replyToMessageID)
       );
       Promise.resolve(result).then(
@@ -196,36 +220,36 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
     } catch (error) {
       finish(error);
     }
-  });
+  }));
 }
 
 (async () => {
   try {
-    const api = await fcaLogin({ appState }, { 
-        listenEvents: true, 
-        selfListen: false,
-        autoReconnect: true 
+    const api = await fcaLogin({ appState }, {
+      listenEvents: true,
+      selfListen: false,
+      autoReconnect: true
     });
 
     const BOT_ID = api.getCurrentUserID();
     currentBotId = BOT_ID;
     console.log("✅ فليكس يعمل | ID:", BOT_ID);
 
-    // 🚨 1. تفعيل أنظمة الحماية (الوضع الآمن)
+    // 🚨 1. تفعيل أنظمة الحماية (الوضع المتوازن)
     try {
-        if (typeof api.setParallelSend === "function") api.setParallelSend(1);
-        if (typeof api.setFastSend === "function") api.setFastSend(false);
-        if (typeof api.autoTyping === "function") api.autoTyping(true);
-        console.log("🛡️ تم تفعيل أنظمة الحماية (الوضع الآمن).");
+      if (typeof api.setParallelSend === "function") api.setParallelSend(2);
+      if (typeof api.setFastSend === "function") api.setFastSend(false);
+      if (typeof api.autoTyping === "function") api.autoTyping(false);
+      console.log("🛡️ تم تفعيل أنظمة الحماية (الوضع المتوازن).");
     } catch (protectionError) {
-        console.log("⚠️ بعض أنظمة الحماية غير مدعومة في هذا الإصدار:", protectionError.message);
+      console.log("⚠️ بعض أنظمة الحماية غير مدعومة في هذا الإصدار:", protectionError.message);
     }
 
     // 2. إرسال رسالة التشغيل التلقائية للمطور
     if (DEV_ID) {
-        setTimeout(() => {
-            api.sendMessage("تم تشغيل فليكس ✅", DEV_ID).catch(e => console.log("فشل إرسال رسالة التشغيل:", e.message));
-        }, 5000); 
+      setTimeout(() => {
+        api.sendMessage("تم تشغيل فليكس ✅", String(DEV_ID)).catch(e => console.log("فشل إرسال رسالة التشغيل:", e.message));
+      }, 5000);
     }
 
     const messageActivity = createMessageActivity({
@@ -254,26 +278,27 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
         }
       }
     }
+
     let reportedOnline = true;
     writeBotStatus(true);
 
     // 3. ميزة منع الخروج من القروبات (Anti-Leave)
     if (typeof api.on === "function") {
-        api.on("log:unsubscribe", async (event) => {
-            if (event.type === "log:unsubscribe") {
-                 const data = loadData();
-                 if (data.antiLeave === false) return;
-                 const leftID = event.logMessageData?.leftParticipantFbId;
-                 if (leftID && String(leftID) !== String(BOT_ID)) {
-                     try {
-                         await api.addUserToGroup(leftID, event.threadID);
-                         await api.sendMessage(`⚠️ تم إعادة العضو الذي حاول الخروج.`, event.threadID);
-                     } catch (e) {
-                         console.log("فشل إعادة العضو:", e.message);
-                     }
-                 }
+      api.on("log:unsubscribe", async (event) => {
+        if (event.type === "log:unsubscribe") {
+          const data = loadData();
+          if (data.antiLeave === false) return;
+          const leftID = event.logMessageData?.leftParticipantFbId;
+          if (leftID && String(leftID) !== String(BOT_ID)) {
+            try {
+              await api.addUserToGroup(leftID, event.threadID);
+              await sendMessageAsync(api, `⚠️ تم إعادة العضو الذي حاول الخروج.`, event.threadID);
+            } catch (e) {
+              console.log("فشل إعادة العضو:", e.message);
             }
-        });
+          }
+        }
+      });
 
       const restrictedEvents = ["checkpoint", "checkpoint_282", "checkpoint_956", "loginBlocked", "sessionExpired", "account_inactive"];
       for (const eventName of restrictedEvents) {
@@ -304,28 +329,31 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
 
       const rawReplyID = legacyCallback ? fourth : third;
       const replyID = rawReplyID == null ? undefined : String(rawReplyID);
+      const targetKey = String(threadID || "");
 
-      let result;
-      try {
-        result = _origSend(msg, String(threadID), replyID);
-      } catch (error) {
-        if (callback) {
-          callback(error);
-          return;
+      return enqueueThreadSend(targetKey, () => {
+        let result;
+        try {
+          result = _origSend(msg, targetKey, replyID);
+        } catch (error) {
+          if (callback) {
+            callback(error);
+            return undefined;
+          }
+          throw error;
         }
-        throw error;
-      }
 
-      return Promise.resolve(result).then(info => {
-        if (info?.messageID) trackMsg(String(threadID), info.messageID);
-        if (callback) callback(null, info);
-        return info;
-      }, error => {
-        if (callback) {
-          callback(error);
-          return undefined;
-        }
-        throw error;
+        return Promise.resolve(result).then(info => {
+          if (info?.messageID) trackMsg(targetKey, info.messageID);
+          if (callback) callback(null, info);
+          return info;
+        }, error => {
+          if (callback) {
+            callback(error);
+            return undefined;
+          }
+          throw error;
+        });
       });
     };
 
@@ -358,7 +386,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
 
     let nicknameCheckRunning = false;
     let discoverGroupsRunning = false;
-    
+
     async function discoverBotGroups() {
       if (discoverGroupsRunning) return false;
       discoverGroupsRunning = true;
@@ -410,8 +438,8 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
         const latestSession = latest.SESSIONS?.[SESSION_ID] || {};
         const legacyConfig = SESSION_ID === "1" ? latest : {};
 
-        config.BOT_NICK = String(latestSession.BOT_NICK || latest.BOT_NICK || config.BOT_NICK);
-        config.DEV_NICK = String(latestSession.DEV_NICK || legacyConfig.DEV_NICK || config.DEV_NICK);
+        config.BOT_NICK = String(latestSession.BOT_NICK || latest.BOT_NICK || DEFAULT_BOT_NICK);
+        config.DEV_NICK = String(latestSession.DEV_NICK || legacyConfig.DEV_NICK || DEFAULT_DEV_NICK);
         config.NICK_GUARD_ENABLED = (latestSession.NICK_GUARD_ENABLED ?? latest.NICK_GUARD_ENABLED) !== false;
         config.DEV_NICK_GUARD_ENABLED = (
           latestSession.DEV_NICK_GUARD_ENABLED ??
@@ -439,7 +467,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
         for (let i = 0; i < ids.length; i += 20) {
           const batch = ids.slice(i, i + 20);
           let infos;
-          try { infos = await getThreadInfoSafe(api, batch); } 
+          try { infos = await getThreadInfoSafe(api, batch); }
           catch (e) { if (isCoolingDown(api)) break; continue; }
 
           for (const id of batch) {
@@ -479,7 +507,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
         for (let i = 0; i < ids.length; i += 20) {
           const batch = ids.slice(i, i + 20);
           let infos;
-          try { infos = await getThreadInfoSafe(api, batch); } 
+          try { infos = await getThreadInfoSafe(api, batch); }
           catch (e) { if (isCoolingDown(api)) break; continue; }
 
           for (const id of batch) {
@@ -519,7 +547,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       let signalClaimed = false;
 
       try {
-        try { fs.unlinkSync(GROUP_REFRESH_SIGNAL_FILE); signalClaimed = true; } 
+        try { fs.unlinkSync(GROUP_REFRESH_SIGNAL_FILE); signalClaimed = true; }
         catch (e) { if (e.code === "ENOENT") return; throw e; }
 
         const updated = await discoverBotGroups();
@@ -536,52 +564,68 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
         refreshSignalRunning = false;
       }
     }
-    
+
     const refreshSignalTimer = setInterval(() => { processGroupRefreshSignal().catch(e => {}); }, 1200);
     if (typeof refreshSignalTimer.unref === "function") refreshSignalTimer.unref();
 
     let sessionErrorLogged = false;
     try { if (typeof api.setOptions === "function") api.setOptions({ listenEvents: true }); } catch (eventOptionsError) {}
 
-    // 🚨 الفحص الدوري للرسائل الخاصة (Polling) 
+    // 🚨 الفحص الدوري للرسائل الخاصة / المشفرة للمطور
     let lastPrivateCheck = Date.now();
-    
+    const handledPollMsgIds = new Set();
+
     setInterval(async () => {
       try {
-        const threads = await api.getThreadList(10, null, ["INBOX"]);
-        
+        const threads = await api.getThreadList(15, null, ["INBOX", "OTHER", "PENDING"]);
+        if (!Array.isArray(threads)) return;
+
         for (const thread of threads) {
-          if (!thread.isGroup && thread.timestamp > lastPrivateCheck && thread.unreadCount > 0) {
-            
-            const history = await api.getThreadHistory(thread.threadID, 5);
-            for (const msg of history) {
-              if (msg.senderID !== BOT_ID && msg.timestamp > lastPrivateCheck) {
-                
-                const isDev = DEV_IDS.includes(String(msg.senderID)) || String(msg.senderID) === String(DEV_ID);
-                
-                if (isDev) {
-                  console.log(`\n📥 [خاص - مطور]: رسالة جديدة من: ${msg.senderID}`);
-                  console.log(`📝 [النص]: "${msg.body}"`);
-                  
-                  const body = String(msg.body || "").trim();
-                  
-                  if (body === "-") {
-                    await api.sendMessage("أحبك ❤️", msg.threadID);
-                  } 
-                  else if (body === "._.") {
-                    await api.sendMessage("يا ربي العظيم، أنت أكثر ما أحب ❤️", msg.threadID);
-                  }
-                  else if (body.includes("منو عمك")) {
-                    await api.sendMessage(" انت 🇩🇪", msg.threadID);
-                  }
-                }
+          if (!thread || thread.isGroup) continue;
+          const threadTs = Number(thread.timestamp || 0);
+          if (threadTs <= lastPrivateCheck) continue;
+
+          const history = await api.getThreadHistory(thread.threadID, 5);
+          if (!Array.isArray(history)) continue;
+
+          for (const msg of history) {
+            const msgId = String(msg.messageID || `${msg.threadID}:${msg.timestamp}`);
+            if (handledPollMsgIds.has(msgId)) continue;
+
+            const msgSender = String(msg.senderID || "");
+            const msgTs = Number(msg.timestamp || 0);
+
+            if (msgSender !== String(BOT_ID) && msgTs > lastPrivateCheck) {
+              const isDev = DEV_IDS.includes(msgSender) || msgSender === String(DEV_ID);
+              if (!isDev) continue;
+
+              handledPollMsgIds.add(msgId);
+              if (handledPollMsgIds.size > 500) {
+                const firstKey = handledPollMsgIds.values().next().value;
+                handledPollMsgIds.delete(firstKey);
+              }
+
+              const targetThread = String(msg.threadID || thread.threadID || msgSender);
+              const body = String(msg.body || "").trim();
+              console.log(`\n📥 [خاص/مشفّر - مطور]: thread=${targetThread}, sender=${msgSender}`);
+              console.log(`📝 [النص]: "${body}"`);
+
+              if (body === "-") {
+                sendMessageAsync(api, "أحبك ❤️", targetThread).catch(() => {});
+              } else if (body === "._.") {
+                sendMessageAsync(api, "يا مطوري العظيم، أنت أكثر ما أحب ❤️", targetThread).catch(() => {});
+              } else if (body.includes("منو عمك")) {
+                sendMessageAsync(api, "هتلر مع علم ألمانيا 🇩🇪", targetThread).catch(() => {});
               }
             }
-            lastPrivateCheck = Math.max(lastPrivateCheck, thread.timestamp);
+          }
+
+          if (threadTs > lastPrivateCheck) {
+            lastPrivateCheck = threadTs;
           }
         }
       } catch (e) {}
-    }, 15000); 
+    }, 15000);
 
     // 🚨 استخدام api.listenMqtt (الأكثر استقراراً في nexus-fca)
     api.listenMqtt(async (err, event) => {
@@ -622,19 +666,32 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       reportedOnline = true;
       sessionErrorLogged = false;
 
-      // 🚨 إخبار فيسبوك بأن الرسالة قد قُرئت
-      if (event.threadID && typeof api.markAsRead === "function") {
-          try {
-              await api.markAsRead(event.threadID);
-          } catch (e) {}
+      const eventType = String(event.type || "");
+      const eventThreadID = String(event.threadID || "");
+      const senderID = String(event.senderID || "");
+      const isPrivateEvent = event.isGroup === false || (!!eventThreadID && eventThreadID === senderID);
+
+      if (["message", "message_reply"].includes(eventType) && isPrivateEvent) {
+        console.log("🔐 [PRIVATE/E2EE DEBUG]:", {
+          type: eventType,
+          threadID: eventThreadID,
+          senderID,
+          isGroup: event.isGroup,
+          body: event.body
+        });
       }
 
       try { stats.recordMessage(event); } catch (e) {}
 
-      const eventThreadID = String(event.threadID || "");
       if (eventThreadID) {
         const currentData = loadData();
-        if (currentData.mutedGroups?.[eventThreadID] === true) return;
+        if (!isPrivateEvent && currentData.mutedGroups?.[eventThreadID] === true) return;
+      }
+
+      if (eventThreadID && typeof api.markAsRead === "function") {
+        try {
+          await api.markAsRead(eventThreadID);
+        } catch (e) {}
       }
 
       const addedParticipants = event.logMessageData?.addedParticipants;
@@ -652,7 +709,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
         }
       }
 
-      if (["message", "message_reply"].includes(event.type)) {
+      if (["message", "message_reply"].includes(eventType)) {
         try {
           await messageActivity.record(event, (threadID, messageEvent) => {
             const sender = String(messageEvent.senderID || "");
@@ -662,52 +719,52 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
         } catch (activityError) {}
       }
 
-      if (event.body && ["message", "message_reply"].includes(event.type)) {
+      if (event.body && ["message", "message_reply"].includes(eventType)) {
         try { autoDownload(api, event, BOT_ID); } catch (downloadError) {}
       }
 
-      if (!event.body || !["message", "message_reply"].includes(event.type)) return;
+      if (!event.body || !["message", "message_reply"].includes(eventType)) return;
 
       const data = loadData() || {};
       const PREFIX = data.prefix || "!";
       const body = String(event.body).trim();
-      const senderID = String(event.senderID || "");
+      const targetID = eventThreadID || senderID;
+      if (!targetID) return;
 
-      const isDev = DEV_IDS.includes(senderID) || String(senderID) === String(DEV_ID);
-      
-      // 🚨 3. ميزة كلمة "فليكس" (للمطور فقط)
+      const isDev = DEV_IDS.includes(senderID) || senderID === String(DEV_ID);
+
       if (isDev && body.toLowerCase() === "فليكس") {
-          await api.sendMessage("شني", event.threadID).catch(()=>{});
-          return;
+        sendMessageAsync(api, "شني", targetID).catch(() => {});
+        return;
       }
 
-      // 🚨 4. ميزة إرسال رسالة خاصة بالـ ID (للمطور فقط)
       if (isDev && body.startsWith("ارسل ")) {
-          const parts = body.split(" ");
-          if (parts.length >= 3) {
-              const targetID = parts[1];
-              const message = parts.slice(2).join(" ");
-              try {
-                  await api.sendMessage(message, targetID);
-                  await api.sendMessage(`✅ تم إرسال رسالتك إلى ${targetID} بنجاح.`, event.threadID);
-              } catch (e) {
-                  await api.sendMessage(`❌ فشل الإرسال: ${e.message}\nتأكد أن الشخص صديق للبوت.`, event.threadID);
-              }
-          } else {
-              await api.sendMessage("الاستخدام: ارسل [ID] [الرسالة]", event.threadID);
-          }
-          return;
+        const parts = body.split(" ");
+        if (parts.length >= 3) {
+          const destID = parts[1];
+          const message = parts.slice(2).join(" ");
+          sendMessageAsync(api, message, destID)
+            .then(() => sendMessageAsync(api, `✅ تم إرسال رسالتك إلى ${destID} بنجاح.`, targetID))
+            .catch(e => sendMessageAsync(api, `❌ فشل الإرسال: ${e.message}\nتأكد أن المعرف صحيح والحساب لا يمنع الرسائل.`, targetID));
+        } else {
+          sendMessageAsync(api, "الاستخدام: ارسل [ID] [الرسالة]", targetID).catch(() => {});
+        }
+        return;
       }
 
-      // (باقي منطق الأوامر العادية)
       if (isDev) {
-        if (body === "'-'") {
-          try { await sendMessageAsync(api, "أحبك ❤️", event.threadID); } catch (e) {}
+        if (body === "•-•") {
+          sendMessageAsync(api, "أحبك ❤️", targetID).catch(() => {});
+          return;
+        }
+
+        if (body === "فليكسة") {
+          sendMessageAsync(api, "يا ربي العظيم، أنت أكثر ما أحب ❤️", targetID).catch(() => {});
           return;
         }
 
         if (body.includes("منو عمك")) {
-          try { await sendMessageAsync(api, "انتاا 🇩🇪", event.threadID); } catch (e) {}
+          sendMessageAsync(api," انت 🇩🇪", targetID).catch(() => {});
           return;
         }
       }
@@ -715,10 +772,10 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       const developerIdsForReactions = new Set([...(Array.isArray(config.DEV_IDS) ? config.DEV_IDS : []), config.DEV_ID].filter(Boolean).map(String));
 
       if (developerIdsForReactions.has(senderID)) {
-        if (body === "مص") {
+        if (body === "مح") {
           try {
             if (event.messageID && typeof api.setMessageReactionMqtt === "function") {
-              await api.setMessageReactionMqtt("❤️", String(event.messageID), String(event.threadID));
+              await api.setMessageReactionMqtt("❤️", String(event.messageID), String(targetID));
             }
           } catch (e) {}
           return;
@@ -751,8 +808,8 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
 
       if (!commands[cmd] && !hasCustomCommand) return;
 
-      stats.recordCommand(cmd, senderID, event.threadID);
-      
+      stats.recordCommand(cmd, senderID, targetID);
+
       let liveConfig = {};
       try { liveConfig = JSON.parse(fs.readFileSync(path.join(DATA_DIR, "config.json"), "utf8")); } catch { liveConfig = config; }
 
@@ -760,9 +817,6 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       const isDeveloper = developerIds.includes(senderID);
       const publicMode = data.publicMode === true;
 
-      const isPrivateEvent = event.isGroup === false || String(event.threadID) === String(event.senderID);
-      
-      // 🚨 5. الاستجابة للأوامر في الخاص
       if (!isPrivateEvent) {
         if (!canExecuteCommand({ cmd, isDeveloper, publicMode })) {
           stats.recordUnauthorized(cmd);
@@ -770,14 +824,11 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
         }
       }
 
-      // 🚨 6. مؤشر الكتابة (Typing Indicator) لمدة 3 ثوانٍ
-      try {
-        if (typeof api.sendTypingIndicator === "function") {
-            await api.sendTypingIndicator(String(event.threadID), true, { duration: 3000, autoStop: true });
-        }
-      } catch (typingError) {}
-
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // تشغيل مؤشر الكتابة والتأخير بشكل غير معطّل لباقي المجموعات
+      if (typeof api.sendTypingIndicator === "function") {
+        Promise.resolve(api.sendTypingIndicator(String(targetID), true, { duration: 1500, autoStop: true })).catch(() => {});
+      }
+      await new Promise(resolve => setTimeout(resolve, 1200));
 
       if (hasCustomCommand) {
         try {
@@ -787,7 +838,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
             const result = customFn(api, event, args, startTime, loadData, saveData, automicTimers, config, hostingInfo, botSentMessages, BOT_ID);
             if (result?.catch) result.catch(e => {});
           } else if (typeof customCommand.reply === "string") {
-            api.sendMessage(customCommand.reply, event.threadID);
+            sendMessageAsync(api, customCommand.reply, targetID).catch(() => {});
           }
         } catch (e) {}
         return;
