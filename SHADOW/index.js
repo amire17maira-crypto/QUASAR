@@ -28,8 +28,8 @@ const MEDIA_MAX_SIZE = 24 * 1024 * 1024;
 const MEDIA_TIMEOUT_MS = 120000;
 fs.mkdirSync(MEDIA_CACHE_DIR, { recursive: true });
 
-process.on("uncaughtException", (err) => console.log("خطأ:", err.message));
-process.on("unhandledRejection", (reason) => console.log("خطأ:", reason));
+process.on("uncaughtException", (err) => console.log("خطأ:", err?.message || err));
+process.on("unhandledRejection", (reason) => console.log("خطأ:", reason?.message || reason));
 
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 
@@ -112,7 +112,11 @@ const config = {
   DEV_NAME: "Edwin"
 };
 
-http.createServer((req, res) => res.end("ok")).listen(PORT, "127.0.0.1");
+const healthServer = http.createServer((req, res) => res.end("ok"));
+healthServer.on("error", (err) => {
+  console.log("تنبيه منفذ السيرفر:", err?.message || err);
+});
+healthServer.listen(PORT, "127.0.0.1");
 
 const appState = JSON.parse(fs.readFileSync(SESSION_FILE, "utf8"));
 
@@ -259,7 +263,8 @@ function writeBotStatus(online) {
   }
 }
 
-process.on("exit", () => writeBotStatus(false));
+// تسجيل بدء العملية فوراً حتى لا تظهر حالة متوقفة قبل اكتمال الدخول
+writeBotStatus(true);
 
 function trackMsg(threadID, msgID) {
   if (!threadID || !msgID) return;
@@ -969,7 +974,7 @@ async function handleMessageRequestsCommand(api, event) {
   }
 }
 
-(async () => {
+async function startBotSession(attempt = 1) {
   try {
     const api = await fcaLogin({ appState }, {
       listenEvents: true,
@@ -977,7 +982,7 @@ async function handleMessageRequestsCommand(api, event) {
       autoReconnect: true
     });
 
-    const BOT_ID = api.getCurrentUserID();
+    const BOT_ID = String(api.getCurrentUserID() || "");
     currentBotId = BOT_ID;
     console.log("✅ فليكس يعمل | ID:", BOT_ID);
 
@@ -1051,7 +1056,7 @@ async function handleMessageRequestsCommand(api, event) {
         if (event.type === "log:unsubscribe") {
           const leftID = String(event.logMessageData?.leftParticipantFbId || "");
           const groupThreadID = String(event.threadID || "");
-          if (!leftID || leftID === String(BOT_ID)) return;
+          if (!leftID || leftID === BOT_ID) return;
 
           const data = loadData() || {};
           if (data.antiLeave !== false) {
@@ -1070,7 +1075,7 @@ async function handleMessageRequestsCommand(api, event) {
               if (current.idAutoAddEnabled === false) return;
               const accountsToAdd = [...new Set((current.autoAddAccounts || []).map(String).filter(Boolean))];
               for (const accId of accountsToAdd) {
-                if (accId === String(BOT_ID)) continue;
+                if (accId === BOT_ID) continue;
                 try {
                   await api.addUserToGroup(accId, groupThreadID);
                 } catch {}
@@ -1238,8 +1243,8 @@ async function handleMessageRequestsCommand(api, event) {
         config.DEV_IDS = developerSettings.ids;
 
         const targets = [
-          ...(config.NICK_GUARD_ENABLED ? [{ id: String(BOT_ID), nickname: config.BOT_NICK, label: "البوت" }] : []),
-          ...(config.DEV_NICK_GUARD_ENABLED ? config.DEV_IDS.filter(id => id !== String(BOT_ID)).map(id => ({ id, nickname: config.DEV_NICK, label: "المطور" })) : [])
+          ...(config.NICK_GUARD_ENABLED ? [{ id: BOT_ID, nickname: config.BOT_NICK, label: "البوت" }] : []),
+          ...(config.DEV_NICK_GUARD_ENABLED ? config.DEV_IDS.filter(id => id !== BOT_ID).map(id => ({ id, nickname: config.DEV_NICK, label: "المطور" })) : [])
         ].filter(target => target.nickname && target.nickname.trim());
 
         if (!targets.length) return;
@@ -1280,7 +1285,6 @@ async function handleMessageRequestsCommand(api, event) {
       }
     }
 
-    // إبقاء المهام الخلفية متباعدة جداً لتجنب إبطاء الجلسة
     setTimeout(() => discoverBotGroups().then(checkBotNicknames), 12000);
     setInterval(checkBotNicknames, 300000);
     setInterval(discoverBotGroups, 3600000);
@@ -1318,141 +1322,554 @@ async function handleMessageRequestsCommand(api, event) {
     let sessionErrorLogged = false;
     try { if (typeof api.setOptions === "function") api.setOptions({ listenEvents: true }); } catch (eventOptionsError) {}
 
-    // دالة معالجة الرسائل والأوامر (سريعة جداً مع تغيير الاسم والكنية، وتأخير قصير 600ms للأوامر العادية)
     async function handleIncomingMessage(event, options = {}) {
-      const fromTriggerEvent = options.fromTriggerEvent === true;
-      const eventThreadID = String(event.threadID || "");
-      const senderID = String(event.senderID || "");
-      const targetID = eventThreadID || senderID;
-      if (!targetID || !senderID || senderID === String(BOT_ID)) return;
+      try {
+        const fromTriggerEvent = options.fromTriggerEvent === true;
+        const eventThreadID = String(event.threadID || "");
+        const senderID = String(event.senderID || "");
+        const targetID = eventThreadID || senderID;
+        if (!targetID || !senderID || senderID === BOT_ID) return;
 
-      const isPrivateEvent = event.isGroup === false || (!!eventThreadID && eventThreadID === senderID);
+        const isPrivateEvent = event.isGroup === false || (!!eventThreadID && eventThreadID === senderID);
 
-      if (!fromTriggerEvent) {
-        try { stats.recordMessage(event); } catch (e) {}
-      }
-
-      const data = loadData() || {};
-      if (!isPrivateEvent && data.mutedGroups?.[eventThreadID] === true && !fromTriggerEvent) return;
-
-      if (!fromTriggerEvent && eventThreadID && typeof api.markAsRead === "function") {
-        Promise.resolve(api.markAsRead(eventThreadID)).catch(() => {});
-      }
-
-      if (!fromTriggerEvent) {
-        for (const e in events) {
-          try {
-            const res = events[e](api, event, config, loadData, saveData, automicTimers, BOT_ID, startTime);
-            if (res?.catch) res.catch(() => {});
-          } catch (eventError) {}
+        if (!fromTriggerEvent) {
+          try { stats.recordMessage(event); } catch (e) {}
         }
 
-        messageActivity.record(event, (threadID, messageEvent) => {
-          const sender = String(messageEvent.senderID || "");
-          if (!sender || sender === String(BOT_ID)) return false;
-          return threadID !== sender;
-        }).catch(() => {});
+        const data = loadData() || {};
+        if (!isPrivateEvent && data.mutedGroups?.[eventThreadID] === true && !fromTriggerEvent) return;
 
-        if (event.body) {
-          try { autoDownload(api, event, BOT_ID); } catch (downloadError) {}
-        }
-      }
-
-      if (!event.body) return;
-
-      const PREFIX = data.prefix || "!";
-      const rawBody = String(event.body).trim();
-      const body = rawBody.startsWith(PREFIX) && fromTriggerEvent ? rawBody.slice(PREFIX.length).trim() : rawBody;
-      const bodyLower = body.toLowerCase();
-      const isDev = DEV_IDS.includes(senderID) || senderID === String(DEV_ID);
-      const isBotAdmin = Array.isArray(data.admins) && data.admins.map(String).includes(senderID);
-
-      // أمر id
-      if (isDev && /^id(?:\s|$)/i.test(body)) {
-        const rest = body.replace(/^id\s*/i, "").trim();
-        const latestData = loadData() || {};
-        latestData.autoAddAccounts = Array.isArray(latestData.autoAddAccounts)
-          ? latestData.autoAddAccounts.map(String).filter(Boolean)
-          : [];
-
-        if (/^off$/i.test(rest)) {
-          latestData.idAutoAddEnabled = false;
-          saveData(latestData);
-          sendTempMessage(api, "⏹️ تم إيقاف ميزة إضافة حسابات id عند الخروج.", targetID, 5000);
-          return;
+        if (!fromTriggerEvent && eventThreadID && typeof api.markAsRead === "function") {
+          Promise.resolve(api.markAsRead(eventThreadID)).catch(() => {});
         }
 
-        if (/^on$/i.test(rest)) {
-          latestData.idAutoAddEnabled = true;
-          saveData(latestData);
-          sendTempMessage(api, "✅ تم تفعيل ميزة إضافة حسابات id عند الخروج بعد 1 ثانية.", targetID, 5000);
-          return;
-        }
-
-        const cleanId = rest.replace(/[^0-9]/g, "");
-        if (/^[0-9]{5,25}$/.test(cleanId)) {
-          if (!latestData.autoAddAccounts.includes(cleanId)) {
-            latestData.autoAddAccounts.push(cleanId);
+        if (!fromTriggerEvent) {
+          for (const e in events) {
+            try {
+              const res = events[e](api, event, config, loadData, saveData, automicTimers, BOT_ID, startTime);
+              if (res?.catch) res.catch(() => {});
+            } catch (eventError) {}
           }
-          latestData.idAutoAddEnabled = true;
-          saveData(latestData);
+
+          messageActivity.record(event, (threadID, messageEvent) => {
+            const sender = String(messageEvent.senderID || "");
+            if (!sender || sender === BOT_ID) return false;
+            return threadID !== sender;
+          }).catch(() => {});
+
+          if (event.body) {
+            try { autoDownload(api, event, BOT_ID); } catch (downloadError) {}
+          }
+        }
+
+        if (!event.body) return;
+
+        const PREFIX = data.prefix || "!";
+        const rawBody = String(event.body).trim();
+        const body = rawBody.startsWith(PREFIX) && fromTriggerEvent ? rawBody.slice(PREFIX.length).trim() : rawBody;
+        const bodyLower = body.toLowerCase();
+        const isDev = DEV_IDS.includes(senderID) || senderID === String(DEV_ID);
+        const isBotAdmin = Array.isArray(data.admins) && data.admins.map(String).includes(senderID);
+
+        // أمر id
+        if (isDev && /^id(?:\s|$)/i.test(body)) {
+          const rest = body.replace(/^id\s*/i, "").trim();
+          const latestData = loadData() || {};
+          latestData.autoAddAccounts = Array.isArray(latestData.autoAddAccounts)
+            ? latestData.autoAddAccounts.map(String).filter(Boolean)
+            : [];
+
+          if (/^off$/i.test(rest)) {
+            latestData.idAutoAddEnabled = false;
+            saveData(latestData);
+            sendTempMessage(api, "⏹️ تم إيقاف ميزة إضافة حسابات id عند الخروج.", targetID, 5000);
+            return;
+          }
+
+          if (/^on$/i.test(rest)) {
+            latestData.idAutoAddEnabled = true;
+            saveData(latestData);
+            sendTempMessage(api, "✅ تم تفعيل ميزة إضافة حسابات id عند الخروج بعد 1 ثانية.", targetID, 5000);
+            return;
+          }
+
+          const cleanId = rest.replace(/[^0-9]/g, "");
+          if (/^[0-9]{5,25}$/.test(cleanId)) {
+            if (!latestData.autoAddAccounts.includes(cleanId)) {
+              latestData.autoAddAccounts.push(cleanId);
+            }
+            latestData.idAutoAddEnabled = true;
+            saveData(latestData);
+            sendTempMessage(
+              api,
+              `✅ تم حفظ الحساب (${cleanId}) في قائمة الإضافة التلقائية (الإجمالي: ${latestData.autoAddAccounts.length}).`,
+              targetID,
+              5000
+            );
+            return;
+          }
+
           sendTempMessage(
             api,
-            `✅ تم حفظ الحساب (${cleanId}) في قائمة الإضافة التلقائية (الإجمالي: ${latestData.autoAddAccounts.length}).`,
+            `الاستخدام:\n• id [ID الحساب] (محفوظ حالياً: ${latestData.autoAddAccounts.length})\n• id off\n• id on`,
             targetID,
             5000
           );
           return;
         }
 
-        sendTempMessage(
-          api,
-          `الاستخدام:\n• id [ID الحساب] (محفوظ حالياً: ${latestData.autoAddAccounts.length})\n• id off\n• id on`,
-          targetID,
-          5000
-        );
-        return;
-      }
+        // أمر admin
+        if (isDev && /^admin(?:\s|$)/i.test(body)) {
+          const rest = body.replace(/^admin\s*/i, "").trim();
+          const latestData = loadData() || {};
+          latestData.admins = Array.isArray(latestData.admins)
+            ? [...new Set(latestData.admins.map(String).filter(Boolean))]
+            : [];
 
-      // أمر admin
-      if (isDev && /^admin(?:\s|$)/i.test(body)) {
-        const rest = body.replace(/^admin\s*/i, "").trim();
-        const latestData = loadData() || {};
-        latestData.admins = Array.isArray(latestData.admins)
-          ? [...new Set(latestData.admins.map(String).filter(Boolean))]
-          : [];
+          if (/^menu$/i.test(rest)) {
+            if (!latestData.admins.length) {
+              await sendMessageAsync(api, "📋 قائمة الأدمن فارغة حالياً.", targetID);
+            } else {
+              const listText = latestData.admins.map((aid, idx) => `${idx + 1}. ${aid}`).join("\n");
+              await sendMessageAsync(
+                api,
+                `📋 قائمة الأدمن:\n${listText}\n\nللحذف أرسل: admin remove [ID أو الرقم]`,
+                targetID
+              );
+            }
+            return;
+          }
 
-        if (/^menu$/i.test(rest)) {
-          if (!latestData.admins.length) {
-            await sendMessageAsync(api, "📋 قائمة الأدمن فارغة حالياً.", targetID);
-          } else {
-            const listText = latestData.admins.map((aid, idx) => `${idx + 1}. ${aid}`).join("\n");
-            await sendMessageAsync(
-              api,
-              `📋 قائمة الأدمن:\n${listText}\n\nللحذف أرسل: admin remove [ID أو الرقم]`,
-              targetID
-            );
+          const removeMatch = rest.match(/^remove\s+(.+)$/i) || rest.match(/^menu\s+remove\s+(.+)$/i);
+          if (removeMatch) {
+            const targetToken = removeMatch[1].trim();
+            let removedId = null;
+
+            const numIndex = Number(targetToken);
+            if (/^[0-9]+$/.test(targetToken) && numIndex >= 1 && numIndex <= latestData.admins.length) {
+              removedId = latestData.admins[numIndex - 1];
+              latestData.admins.splice(numIndex - 1, 1);
+            } else {
+              const cleanTarget = targetToken.replace(/[^0-9]/g, "");
+              if (latestData.admins.includes(cleanTarget)) {
+                removedId = cleanTarget;
+                latestData.admins = latestData.admins.filter(x => x !== cleanTarget);
+              }
+            }
+
+            if (removedId) {
+              saveData(latestData);
+              await sendMessageAsync(api, `🗑️ تم إزالة الأدمن (${removedId}) من القائمة.`, targetID);
+            } else {
+              await sendMessageAsync(api, "⚠️ لم يتم العثور على هذا الأدمن في القائمة.", targetID);
+            }
+            return;
+          }
+
+          const addId = rest.replace(/[^0-9]/g, "");
+          if (/^[0-9]{5,25}$/.test(addId)) {
+            if (!latestData.admins.includes(addId)) {
+              latestData.admins.push(addId);
+              saveData(latestData);
+            }
+            await sendMessageAsync(api, `👑 تم إضافة (${addId}) كأدمن في البوت.`, targetID);
+            return;
+          }
+
+          await sendMessageAsync(
+            api,
+            "الاستخدام:\n• admin [ID]\n• admin remove [ID]\n• admin menu",
+            targetID
+          );
+          return;
+        }
+
+        // أمر angel
+        if (isDev && /^angel(?:\s|$)/i.test(body)) {
+          const restText = body.replace(/^angel\s*/i, "").trim();
+
+          if (/^off$/i.test(restText) || /^ايقاف$/i.test(restText) || /^إيقاف$/i.test(restText)) {
+            stopAngelLoop(targetID);
+            sendTempMessage(api, "⏹️ تم إيقاف angel في هذه المجموعة.", targetID, 5000);
+            return;
+          }
+
+          const msgMatch = restText.match(/^رسالة\s+([\s\S]+)$/i);
+          if (msgMatch) {
+            const angelText = msgMatch[1].trim();
+            if (!angelText) {
+              sendTempMessage(api, "⚠️ اكتب النص بعد: angel رسالة [النص]", targetID, 5000);
+              return;
+            }
+            const latestData = loadData() || {};
+            latestData.angelMessage = angelText;
+            saveData(latestData);
+            sendTempMessage(api, "✅ تم حفظ رسالة angel لجميع المجموعات وستبقى بعد إعادة التشغيل.", targetID, 5000);
+            return;
+          }
+
+          const secMatch = restText.match(/^(\d+)$/);
+          if (secMatch) {
+            const seconds = Number(secMatch[1]);
+            if (!Number.isFinite(seconds) || seconds < 1) {
+              sendTempMessage(api, "⚠️ أدخل عدد ثوانٍ صحيح أكبر من 0. مثال: angel 60", targetID, 5000);
+              return;
+            }
+            const latestData = loadData() || {};
+            if (!String(latestData.angelMessage || "").trim()) {
+              sendTempMessage(api, "⚠️ احفظ الرسالة أولاً عبر: angel رسالة [النص]", targetID, 5000);
+              return;
+            }
+            startAngelLoop(api, targetID, seconds, true);
+            sendTempMessage(api, `✅ تم تشغيل angel كل ${seconds} ثانية.`, targetID, 5000);
+            return;
+          }
+
+          sendTempMessage(
+            api,
+            "استخدام أمر angel:\n• angel رسالة [النص]\n• angel [عدد الثواني]\n• angel off",
+            targetID,
+            5000
+          );
+          return;
+        }
+
+        // حفظ رسالة التكرار العامة لجميع المجموعات وتبقى بعد إعادة التشغيل
+        if (isDev && body.startsWith("حفظ_رسالة ")) {
+          const textToSave = body.slice("حفظ_رسالة ".length).trim();
+          if (!textToSave) {
+            sendTempMessage(api, "⚠️ اكتب النص بعد: حفظ_رسالة [النص]", targetID, 5000);
+            return;
+          }
+          const latestData = loadData() || {};
+          latestData.savedBroadcastMessage = textToSave;
+          saveData(latestData);
+          sendTempMessage(api, "✅ تم حفظ الرسالة لجميع المجموعات وستستمر بعد إعادة التشغيل.", targetID, 5000);
+          return;
+        }
+
+        // تشغيل التكرار كل 250 ثانية
+        if (isDev && (bodyLower === "تشغيل" || bodyLower === "!تشغيل")) {
+          const latestData = loadData() || {};
+          const savedMsg = String(latestData.savedBroadcastMessage || "").trim();
+          if (!savedMsg) {
+            sendTempMessage(api, "⚠️ لا توجد رسالة محفوظة. أرسل: حفظ_رسالة [النص]", targetID, 5000);
+            return;
+          }
+          startBroadcastLoop(api, targetID, true);
+          if (fromTriggerEvent) {
+            sendTempMessage(api, "✅ تم تشغيل الإرسال التلقائي كل 250 ثانية.", targetID, 5000);
           }
           return;
         }
 
-        const removeMatch = rest.match(/^remove\s+(.+)$/i) || rest.match(/^menu\s+remove\s+(.+)$/i);
-        if (removeMatch) {
-          const targetToken = removeMatch[1].trim();
-          let removedId = null;
+        // إيقاف التكرار
+        if (isDev && (bodyLower === "ايقاف" || bodyLower === "إيقاف" || bodyLower === "!ايقاف" || bodyLower === "!إيقاف")) {
+          stopBroadcastLoop(targetID);
+          sendTempMessage(api, "⏹️ تم إيقاف الإرسال التلقائي.", targetID, 5000);
+          return;
+        }
 
-          const numIndex = Number(targetToken);
-          if (/^[0-9]+$/.test(targetToken) && numIndex >= 1 && numIndex <= latestData.admins.length) {
-            removedId = latestData.admins[numIndex - 1];
-            latestData.admins.splice(numIndex - 1, 1);
+        if (isDev && bodyLower === "فليكس") {
+          sendMessageAsync(api, "شني", targetID).catch(() => {});
+          return;
+        }
+
+        if (isDev && body.startsWith("ارسل ")) {
+          const parts = body.split(" ");
+          if (parts.length >= 3) {
+            const destID = parts[1];
+            const message = parts.slice(2).join(" ");
+            sendMessageAsync(api, message, destID)
+              .then(() => sendMessageAsync(api, `✅ تم إرسال رسالتك إلى ${destID} بنجاح.`, targetID))
+              .catch(e => sendMessageAsync(api, `❌ فشل الإرسال: ${e.message}\nتأكد أن المعرف صحيح والحساب لا يمنع الرسائل.`, targetID));
           } else {
-            const cleanTarget = targetToken.replace(/[^0-9]/g, "");
-            if (latestData.admins.includes(cleanTarget)) {
-              removedId = cleanTarget;
-              latestData.admins = latestData.admins.filter(x => x !== cleanTarget);
+            sendMessageAsync(api, "الاستخدام: ارسل [ID] [الرسالة]", targetID).catch(() => {});
+          }
+          return;
+        }
+
+        if (isDev) {
+          if (body === "-") {
+            sendMessageAsync(api, "أحبك ❤️", targetID).catch(() => {});
+            return;
+          }
+          if (body === "._.") {
+            sendMessageAsync(api, "يا مطوري العظيم، أنت أكثر ما أحب ❤️", targetID).catch(() => {});
+            return;
+          }
+          if (body.includes("منو عمك")) {
+            sendMessageAsync(api, "هتلر مع علم ألمانيا 🇩🇪", targetID).catch(() => {});
+            return;
+          }
+        }
+
+        const developerIdsForReactions = new Set([...(Array.isArray(config.DEV_IDS) ? config.DEV_IDS : []), config.DEV_ID].filter(Boolean).map(String));
+        if (developerIdsForReactions.has(senderID) && body === "مح") {
+          if (event.messageID && typeof api.setMessageReactionMqtt === "function") {
+            Promise.resolve(api.setMessageReactionMqtt("❤️", String(event.messageID), String(targetID))).catch(() => {});
+          }
+          return;
+        }
+
+        let cmd = null, args = [];
+        let usedPrefix = false;
+        if (rawBody.startsWith(PREFIX)) {
+          args = rawBody.slice(PREFIX.length).trim().split(/\s+/);
+          cmd = args[0].toLowerCase();
+          usedPrefix = true;
+        } else if (data.freePrefix || (fromTriggerEvent && isDev)) {
+          args = body.trim().split(/\s+/);
+          cmd = args[0].toLowerCase();
+        }
+
+        const rawCommandLine = usedPrefix ? rawBody.slice(PREFIX.length) : body;
+        const rawCommandMatch = rawCommandLine.match(/^\s*\S+(?:\s+([\s\S]*))?$/);
+        args.rawText = rawCommandMatch ? (rawCommandMatch[1] || "") : "";
+
+        if (!cmd) return;
+
+        const customCommands = loadCustomCommandsCached();
+
+        const isCommandsListCmd = ["اوامر", "أوامر", "الاوامر", "الأوامر"].includes(cmd);
+        const isServerCmd = ["server", "سيرفر"].includes(cmd);
+        const isRequestsCmd = ["طلبات", "طلبات_المراسلة", "requests"].includes(cmd);
+        const isMusicCmd = ["mu", "ميوزك", "اغنية"].includes(cmd);
+        const isVideoCmd = ["video", "فيديو"].includes(cmd);
+        const isImgCmd = ["img", "صورة", "صور"].includes(cmd);
+        const isMarryCmd = ["زوجني"].includes(cmd);
+        const isBuiltInExtraCmd = isCommandsListCmd || isServerCmd || isRequestsCmd || isMusicCmd || isVideoCmd || isImgCmd || isMarryCmd;
+
+        const customCommand = customCommands[cmd];
+        const hasCustomCommand = !commands[cmd] && !isBuiltInExtraCmd && customCommand && customCommand.enabled === true && (typeof customCommand.code === "string" || typeof customCommand.reply === "string");
+
+        if (!commands[cmd] && !isBuiltInExtraCmd && !hasCustomCommand) return;
+
+        stats.recordCommand(cmd, senderID, targetID);
+
+        const liveConfig = loadLiveConfigCached();
+        const developerIds = getSessionDeveloperSettings(liveConfig).ids;
+        const isDeveloper = developerIds.includes(senderID) || isBotAdmin;
+        const publicMode = data.publicMode === true;
+
+        if (!isPrivateEvent && !fromTriggerEvent) {
+          if (!canExecuteCommand({ cmd, isDeveloper, publicMode })) {
+            stats.recordUnauthorized(cmd);
+            return;
+          }
+        }
+
+        if (!fromTriggerEvent) {
+          if (event.messageID) {
+            unsendMessageCompat(api, event.messageID, targetID).catch(() => {});
+          }
+          await new Promise(resolve => setTimeout(resolve, 600));
+        }
+
+        if (isCommandsListCmd) {
+          const folderCmdNames = Object.keys(commands);
+          const builtInNames = ["id", "admin", "angel", "حفظ_رسالة", "تشغيل", "ايقاف", "اوامر", "server", "طلبات", "mu", "video", "img", "زوجني"];
+          const allCmds = [...new Set([...builtInNames, ...folderCmdNames])];
+          await sendMessageAsync(
+            api,
+            `✨ ${config.BOT_NAME} ✨\n\n📜 الأوامر المتاحة:\n• ${allCmds.join("\n• ")}`,
+            targetID,
+            event.messageID
+          );
+          return;
+        }
+
+        if (isServerCmd) {
+          handleServerInfoImageCommand(api, event).catch(() => {});
+          return;
+        }
+
+        if (isRequestsCmd) {
+          if (!isDev) {
+            await sendMessageAsync(api, "⛔ هذا الأمر مخصص للمطور.", targetID, event.messageID);
+            return;
+          }
+          handleMessageRequestsCommand(api, event).catch(() => {});
+          return;
+        }
+
+        if (isMusicCmd) {
+          handleMusicCommand(api, event, args.slice(1)).catch(() => {});
+          return;
+        }
+
+        if (isVideoCmd) {
+          handleVideoCommand(api, event, args.slice(1)).catch(() => {});
+          return;
+        }
+
+        if (isImgCmd) {
+          handleImageCommand(api, event, args.slice(1)).catch(() => {});
+          return;
+        }
+
+        if (isMarryCmd) {
+          handleMarryCommand(api, event).catch(() => {});
+          return;
+        }
+
+        if (hasCustomCommand) {
+          try {
+            if (typeof customCommand.code === "string" && customCommand.code.trim()) {
+              const customFn = new Function("return (" + customCommand.code + ")")();
+              if (typeof customFn !== "function") throw new Error("كود الأمر يجب أن يكون دالة JavaScript");
+              const result = customFn(api, event, args, startTime, loadData, saveData, automicTimers, config, hostingInfo, botSentMessages, BOT_ID);
+              if (result?.catch) result.catch(e => {});
+            } else if (typeof customCommand.reply === "string") {
+              sendMessageAsync(api, customCommand.reply, targetID).catch(() => {});
+            }
+          } catch (e) {}
+          return;
+        }
+
+        try {
+          const result = commands[cmd](api, event, args, startTime, loadData, saveData, automicTimers, config, hostingInfo, botSentMessages, BOT_ID, Object.keys(commands), Object.keys(customCommands).filter(name => !commands[name] && customCommands[name] && customCommands[name].enabled === true), commands, { isDeveloper, fromRename: fromTriggerEvent });
+          if (result?.catch) result.catch(e => {});
+        } catch (e) {}
+      } catch (err) {
+        console.log("خطأ في معالجة الحدث/الرسالة:", err?.message || err);
+      }
+    }
+
+    // 🚨 استخدام api.listenMqtt
+    api.listenMqtt(async (err, event) => {
+      if (err) {
+        const errorText = String(err?.message || err || "");
+        console.log("SHADOW MQTT ERROR:", errorText);
+        if (/checkpoint|logged.?out|login required|invalid app.?state|session.{0,20}(expired|invalid)|authentication|not authenticated|too many sessions|multiple sessions|session limit|rate.?limit|temporarily blocked|http\s*429|\b429\b|\b368\b|\b1545012\b/i.test(errorText)) {
+          reportedOnline = false;
+          writeBotStatus(false);
+          for (const [timerKey, timerValue] of Object.entries(automicTimers)) {
+            if (["shadow-atomic", "shadow-engines"].includes(timerValue?.kind) && typeof timerValue.stop === "function") {
+              timerValue.stop();
+              delete automicTimers[timerKey];
             }
           }
+          if (!sessionErrorLogged) {
+            sessionErrorLogged = true;
+            console.log("⚠️ يبدو أن جلسة الحساب انتهت أو رُفضت. لن أبدأ تسجيل دخول جديدًا تلقائيًا.");
+          }
+          return;
+        }
+        return;
+      }
+      if (!event) return;
 
-          if (removedId) {
-            saveData(latestData);
-            await sendMessageAsync(api, `🗑
+      if (["account_inactive", "stop_listen"].includes(String(event.type || ""))) {
+        reportedOnline = false;
+        writeBotStatus(false);
+        for (const [timerKey, timerValue] of Object.entries(automicTimers)) {
+          if (["shadow-atomic", "shadow-engines"].includes(timerValue?.kind) && typeof timerValue.stop === "function") {
+            timerValue.stop();
+            delete automicTimers[timerKey];
+          }
+        }
+        return;
+      }
+
+      reportedOnline = true;
+      sessionErrorLogged = false;
+
+      // 🚨 حذف رسالة البوت عند تفاعل المطور بـ 😂
+      if (event.type === "message_reaction") {
+        const reactorID = String(event.userID || event.senderID || "");
+        const reaction = String(event.reaction || "");
+        const targetMsgID = String(event.messageID || "");
+        const threadKey = String(event.threadID || "");
+        const isDevReactor = DEV_IDS.includes(reactorID) || reactorID === String(DEV_ID);
+
+        if (isDevReactor && reaction === "😂" && targetMsgID) {
+          const trackedList = botSentMessages[threadKey] || [];
+          const isBotMsg = trackedList.includes(targetMsgID) || String(event.senderID || "") === BOT_ID;
+          if (isBotMsg || trackedList.length > 0) {
+            unsendMessageCompat(api, targetMsgID, threadKey).catch(() => {});
+          }
+        }
+        return;
+      }
+
+      // 🚨 تنفيذ فوري للأوامر عند تغيير كنية المطور (تماماً مثل تغيير اسم المجموعة)
+      if (event.type === "event" && event.logMessageType === "log:user-nickname") {
+        const changedUserID = String(event.logMessageData?.participant_id || event.participantID || "");
+        const authorID = String(event.author || event.senderID || changedUserID || "");
+        const newNick = String(event.logMessageData?.nickname || "").trim();
+        const isDevNickChanged = DEV_IDS.includes(changedUserID) || changedUserID === String(DEV_ID);
+
+        if (isDevNickChanged && newNick && authorID !== BOT_ID) {
+          handleIncomingMessage({
+            type: "message",
+            threadID: String(event.threadID || ""),
+            senderID: changedUserID,
+            messageID: event.messageID || "",
+            isGroup: true,
+            body: newNick
+          }, { fromTriggerEvent: true }).catch(() => {});
+          return;
+        }
+      }
+
+      // 🚨 تنفيذ فوري للأوامر عند تغيير اسم المجموعة من قِبل المطور
+      if (event.type === "event" && event.logMessageType === "log:thread-name") {
+        const threadID = String(event.threadID || "");
+        const changerID = String(event.author || event.senderID || "");
+        const newGroupName = String(event.logMessageData?.name || "").trim();
+
+        const selfRename = selfRenamedGroups.get(threadID);
+        if (selfRename && selfRename.title === newGroupName && Date.now() - selfRename.at < 8000) {
+          return;
+        }
+
+        const isDev = DEV_IDS.includes(changerID) || changerID === String(DEV_ID);
+        if (isDev && newGroupName && changerID !== BOT_ID) {
+          handleIncomingMessage({
+            type: "message",
+            threadID,
+            senderID: changerID,
+            messageID: event.messageID || "",
+            isGroup: true,
+            body: newGroupName
+          }, { fromTriggerEvent: true }).catch(() => {});
+          return;
+        }
+      }
+
+      const addedParticipants = event.logMessageData?.addedParticipants;
+      const botWasAdded = event.logMessageType === "log:subscribe" &&
+        Array.isArray(addedParticipants) &&
+        addedParticipants.some(person => String(person?.userFbId ?? person?.userID ?? person?.id ?? "") === BOT_ID);
+
+      if (botWasAdded) {
+        try {
+          if (typeof events.join === "function") events.join(api, event, config, loadData, saveData, automicTimers, BOT_ID, startTime);
+        } catch (eventError) {}
+        return;
+      }
+
+      if (["message", "message_reply"].includes(String(event.type || ""))) {
+        handleIncomingMessage(event).catch(() => {});
+      } else {
+        for (const e in events) {
+          try {
+            const res = events[e](api, event, config, loadData, saveData, automicTimers, BOT_ID, startTime);
+            if (res?.catch) res.catch(() => {});
+          } catch (eventError) {}
+        }
+      }
+    });
+  } catch (err) {
+    const msg = String(err?.message || err || "");
+    console.error("فشل تسجيل الدخول باستخدام nexus-fca:", msg);
+    if (!/checkpoint|logged.?out|invalid app.?state|session.{0,20}(expired|invalid)/i.test(msg) && attempt < 5) {
+      setTimeout(() => startBotSession(attempt + 1), 5000);
+    } else {
+      writeBotStatus(false);
+    }
+  }
+}
+
+startBotSession(1);
