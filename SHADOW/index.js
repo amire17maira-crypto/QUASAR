@@ -10,6 +10,8 @@ const fcaLogin = require("nexus-fca");
 const { getThreadInfoSafe, getThreadListSafe, isCoolingDown, installThreadOperationGuard } = require("./thread-info-guard");
 const fs = require("fs");
 const path = require("path");
+const { spawn } = require("child_process");
+const yts = require("yt-search");
 const ROOT = path.resolve(__dirname, "..");
 const DATA_DIR = path.resolve(process.env.SHADOW_DATA_DIR || ROOT);
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -19,6 +21,12 @@ const stats = require("./stats");
 const { canExecuteCommand } = require("./command-access");
 const autoDownload = require("./auto-download");
 const { createMessageActivity } = require("./message-activity");
+
+const MEDIA_CACHE_DIR = path.join(__dirname, "cache");
+const MEDIA_MAX_MINS = 10;
+const MEDIA_MAX_SIZE = 24 * 1024 * 1024;
+const MEDIA_TIMEOUT_MS = 120000;
+fs.mkdirSync(MEDIA_CACHE_DIR, { recursive: true });
 
 process.on("uncaughtException", (err) => console.log("خطأ:", err.message));
 process.on("unhandledRejection", (reason) => console.log("خطأ:", reason));
@@ -106,7 +114,6 @@ http.createServer((req, res) => res.end("ok")).listen(PORT, "127.0.0.1");
 
 const appState = JSON.parse(fs.readFileSync(SESSION_FILE, "utf8"));
 
-// تخزين مؤقت في الذاكرة لتسريع القراءة ومنع البطء
 let cachedData = null;
 let cachedDataAt = 0;
 
@@ -120,7 +127,21 @@ function loadData() {
     cachedDataAt = now;
     return cachedData;
   } catch {
-    return { prefix: "!", freePrefix: false, protected: {}, savedMessages: [], admins: [], locked: {}, antiLeave: true };
+    return {
+      prefix: "!",
+      freePrefix: false,
+      protected: {},
+      savedMessages: [],
+      admins: [],
+      locked: {},
+      antiLeave: true,
+      savedBroadcastMessage: "",
+      activeBroadcastThreads: [],
+      angelMessage: "",
+      angelSchedules: {},
+      autoAddAccounts: [],
+      idAutoAddEnabled: true
+    };
   }
 }
 
@@ -158,13 +179,11 @@ fs.readdirSync(path.join(ROOT, "events")).forEach(file => {
 const automicTimers = {};
 const botSentMessages = {};
 const broadcastTimers = new Map();
+const angelTimers = new Map();
 const startTime = Date.now();
 let currentBotId = null;
 
-// طابور إرسال معزول لكل محادثة/مجموعة لمنع تكرار الرسائل في مجموعة من تعطيل باقي المجموعات
 const threadSendQueues = new Map();
-
-// تتبع آخر الأسماء التي وضعها البوت نفسه حتى لا يعيد تفسيرها كأمر
 const selfRenamedGroups = new Map();
 
 function enqueueThreadSend(threadKey, taskFn) {
@@ -268,7 +287,6 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
   }));
 }
 
-// إرسال رسالة مؤقتة تُحذف تلقائياً بعد 5 ثوانٍ
 function sendTempMessage(api, message, threadID, delayMs = 5000) {
   const targetKey = String(threadID || "");
   return sendMessageAsync(api, message, targetKey)
@@ -285,15 +303,38 @@ function sendTempMessage(api, message, threadID, delayMs = 5000) {
     .catch(() => {});
 }
 
-function startBroadcastLoop(api, threadID) {
+function formatDuration(secondsTotal) {
+  const sec = Math.max(0, Math.floor(Number(secondsTotal) || 0));
+  const days = Math.floor(sec / 86400);
+  const hours = Math.floor((sec % 86400) / 3600);
+  const mins = Math.floor((sec % 3600) / 60);
+  const remSec = sec % 60;
+  return `${days}d ${hours}h ${mins}m ${remSec}s`;
+}
+
+// حفظ حالة البث القديم (250 ثانية)
+function setThreadBroadcastState(threadID, enabled) {
   const key = String(threadID);
+  const d = loadData() || {};
+  const list = new Set(Array.isArray(d.activeBroadcastThreads) ? d.activeBroadcastThreads.map(String) : []);
+  if (enabled) list.add(key);
+  else list.delete(key);
+  d.activeBroadcastThreads = [...list];
+  saveData(d);
+}
+
+function startBroadcastLoop(api, threadID, persist = true) {
+  const key = String(threadID);
+  if (persist) {
+    setThreadBroadcastState(key, true);
+  }
   if (broadcastTimers.has(key)) {
     clearInterval(broadcastTimers.get(key));
   }
 
   const sendSaved = () => {
-    const d = loadData();
-    const msg = d.groupBroadcastMessages?.[key] || d.savedBroadcastMessage;
+    const d = loadData() || {};
+    const msg = String(d.savedBroadcastMessage || "").trim();
     if (!msg) return;
     sendMessageAsync(api, msg, key).catch(() => {});
   };
@@ -306,10 +347,581 @@ function startBroadcastLoop(api, threadID) {
 
 function stopBroadcastLoop(threadID) {
   const key = String(threadID);
+  setThreadBroadcastState(key, false);
   const timer = broadcastTimers.get(key);
   if (timer) {
     clearInterval(timer);
     broadcastTimers.delete(key);
+  }
+}
+
+// نظام angel
+function setAngelScheduleState(threadID, secondsOrNull) {
+  const key = String(threadID);
+  const d = loadData() || {};
+  d.angelSchedules = d.angelSchedules && typeof d.angelSchedules === "object" ? d.angelSchedules : {};
+  if (secondsOrNull && secondsOrNull > 0) {
+    d.angelSchedules[key] = Number(secondsOrNull);
+  } else {
+    delete d.angelSchedules[key];
+  }
+  saveData(d);
+}
+
+function startAngelLoop(api, threadID, seconds, persist = true) {
+  const key = String(threadID);
+  const sec = Math.max(1, Number(seconds) || 1);
+  if (persist) {
+    setAngelScheduleState(key, sec);
+  }
+  if (angelTimers.has(key)) {
+    clearInterval(angelTimers.get(key));
+  }
+
+  const tick = () => {
+    const d = loadData() || {};
+    const msg = String(d.angelMessage || "").trim();
+    if (!msg) return;
+    sendMessageAsync(api, msg, key).catch(() => {});
+  };
+
+  const timer = setInterval(tick, sec * 1000);
+  if (typeof timer.unref === "function") timer.unref();
+  angelTimers.set(key, timer);
+}
+
+function stopAngelLoop(threadID) {
+  const key = String(threadID);
+  setAngelScheduleState(key, null);
+  const timer = angelTimers.get(key);
+  if (timer) {
+    clearInterval(timer);
+    angelTimers.delete(key);
+  }
+}
+
+// دوال تحميل الصوت والفيديو والصور
+function cleanMediaFile(file) {
+  try {
+    if (file && fs.existsSync(file)) fs.unlinkSync(file);
+  } catch {}
+}
+
+function secToTime(seconds) {
+  const value = Math.floor(Number(seconds) || 0);
+  const minutes = Math.floor(value / 60);
+  return `${minutes}:${String(value % 60).padStart(2, "0")}`;
+}
+
+function downloadAudio(url, output) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      url,
+      "-f", "bestaudio/best",
+      "-x",
+      "--audio-format", "mp3",
+      "--audio-quality", "0",
+      "--max-filesize", String(MEDIA_MAX_SIZE),
+      "-o", output,
+      "--no-playlist",
+      "--socket-timeout", "30",
+      "--retries", "3",
+      "--no-warnings"
+    ];
+
+    const proc = spawn("yt-dlp", args, { stdio: ["ignore", "ignore", "pipe"] });
+
+    let stderr = "";
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      try { proc.kill("SIGKILL"); } catch {}
+      finish(new Error("انتهت مهلة التحميل."));
+    }, MEDIA_TIMEOUT_MS);
+
+    function finish(error, file) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(file);
+    }
+
+    proc.stderr.on("data", chunk => {
+      stderr = (stderr + chunk.toString()).slice(-1500);
+    });
+
+    proc.on("error", error => finish(error));
+
+    proc.on("close", code => {
+      const file = output.endsWith(".mp3") ? output : output + ".mp3";
+
+      if (code === 0 && fs.existsSync(file)) {
+        const size = fs.statSync(file).size;
+        if (size > MEDIA_MAX_SIZE) {
+          cleanMediaFile(file);
+          return finish(new Error("SIZE_LIMIT"));
+        }
+        return finish(null, file);
+      }
+
+      finish(new Error(stderr || `yt-dlp exited ${code}`));
+    });
+  });
+}
+
+function downloadVideoMp4(url, output) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      url,
+      "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+      "--merge-output-format", "mp4",
+      "--max-filesize", String(MEDIA_MAX_SIZE),
+      "-o", output,
+      "--no-playlist",
+      "--socket-timeout", "30",
+      "--retries", "3",
+      "--no-warnings"
+    ];
+
+    const proc = spawn("yt-dlp", args, { stdio: ["ignore", "ignore", "pipe"] });
+
+    let stderr = "";
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      try { proc.kill("SIGKILL"); } catch {}
+      finish(new Error("انتهت مهلة التحميل."));
+    }, MEDIA_TIMEOUT_MS);
+
+    function finish(error, file) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(file);
+    }
+
+    proc.stderr.on("data", chunk => {
+      stderr = (stderr + chunk.toString()).slice(-1500);
+    });
+
+    proc.on("error", error => finish(error));
+
+    proc.on("close", code => {
+      const candidates = [
+        output,
+        output + ".mp4",
+        output.replace(/\.mp4$/i, "") + ".mp4"
+      ];
+      const found = candidates.find(p => p && fs.existsSync(p));
+
+      if (code === 0 && found) {
+        const size = fs.statSync(found).size;
+        if (size > MEDIA_MAX_SIZE) {
+          cleanMediaFile(found);
+          return finish(new Error("SIZE_LIMIT"));
+        }
+        return finish(null, found);
+      }
+
+      finish(new Error(stderr || `yt-dlp exited ${code}`));
+    });
+  });
+}
+
+async function handleMusicCommand(api, event, args) {
+  const threadID = String(event.threadID || "");
+  const messageID = event.messageID ? String(event.messageID) : undefined;
+  const query = Array.isArray(args) ? args.join(" ").trim() : "";
+
+  if (!query) {
+    return sendMessageAsync(api, "🎵 اكتب اسم الأغنية.\nمثال: !mu faded", threadID, messageID);
+  }
+
+  let waitID = null;
+  let file = null;
+
+  try {
+    const waiting = await sendMessageAsync(api, `🔎 جاري البحث عن: ${query}`, threadID, messageID);
+    waitID = waiting?.messageID;
+
+    const result = await yts(query);
+    const videos = (result.videos || []).filter(video =>
+      Number(video.seconds) > 0 &&
+      Number(video.seconds) <= MEDIA_MAX_MINS * 60
+    );
+
+    const video = videos[0];
+    if (!video) {
+      await unsendMessageCompat(api, waitID, threadID);
+      return sendMessageAsync(api, "❌ لم أجد أغنية مناسبة أقل من 10 دقائق.", threadID, messageID);
+    }
+
+    const title = video.title || query;
+    const channel = video.author?.name || "غير معروف";
+    const duration = Number(video.seconds) || 0;
+
+    await unsendMessageCompat(api, waitID, threadID);
+    waitID = null;
+
+    const downloading = await sendMessageAsync(api, `⬇️ جاري تحميل الأغنية:\n${title}`, threadID, messageID);
+    waitID = downloading?.messageID;
+
+    const output = path.join(MEDIA_CACHE_DIR, `mu_${process.env.SHADOW_SESSION_ID || "1"}_${Date.now()}.mp3`);
+    file = await downloadAudio(video.url, output);
+
+    await unsendMessageCompat(api, waitID, threadID);
+    waitID = null;
+
+    await new Promise((resolve, reject) => {
+      const stream = fs.createReadStream(file);
+      stream.once("error", reject);
+
+      api.sendMessage(
+        {
+          body: `🎵 ${title}\n🎤 ${channel}\n⏱ ${secToTime(duration)}`,
+          attachment: stream
+        },
+        threadID,
+        messageID,
+        error => error ? reject(error) : resolve()
+      );
+    });
+  } catch (error) {
+    console.error("[MU COMMAND]", error?.message || error);
+    await unsendMessageCompat(api, waitID, threadID);
+
+    const message = error?.message === "SIZE_LIMIT"
+      ? "❌ حجم الأغنية أكبر من 24MB."
+      : "❌ تعذر البحث أو تحميل الأغنية. حاول مرة أخرى.";
+
+    try {
+      await sendMessageAsync(api, message, threadID, messageID);
+    } catch {}
+  } finally {
+    cleanMediaFile(file);
+  }
+}
+
+async function handleVideoCommand(api, event, args) {
+  const threadID = String(event.threadID || "");
+  const messageID = event.messageID ? String(event.messageID) : undefined;
+  const query = Array.isArray(args) ? args.join(" ").trim() : "";
+
+  if (!query) {
+    return sendMessageAsync(api, "🎬 اكتب اسم الفيديو أو رابطه.\nمثال: !video لقطة مضحكة", threadID, messageID);
+  }
+
+  let waitID = null;
+  let file = null;
+
+  try {
+    const waiting = await sendMessageAsync(api, `🔎 جاري البحث عن الفيديو: ${query}`, threadID, messageID);
+    waitID = waiting?.messageID;
+
+    let targetUrl = query;
+    let title = query;
+    let channel = "غير معروف";
+    let duration = 0;
+
+    if (!/^https?:\/\//i.test(query)) {
+      const result = await yts(query);
+      const videos = (result.videos || []).filter(v =>
+        Number(v.seconds) > 0 &&
+        Number(v.seconds) <= MEDIA_MAX_MINS * 60
+      );
+      const picked = videos[0];
+      if (!picked) {
+        await unsendMessageCompat(api, waitID, threadID);
+        return sendMessageAsync(api, "❌ لم أجد فيديو مناسباً أقل من 10 دقائق.", threadID, messageID);
+      }
+      targetUrl = picked.url;
+      title = picked.title || query;
+      channel = picked.author?.name || "غير معروف";
+      duration = Number(picked.seconds) || 0;
+    }
+
+    await unsendMessageCompat(api, waitID, threadID);
+    waitID = null;
+
+    const downloading = await sendMessageAsync(api, `⬇️ جاري تحميل الفيديو:\n${title}`, threadID, messageID);
+    waitID = downloading?.messageID;
+
+    const output = path.join(MEDIA_CACHE_DIR, `vid_${process.env.SHADOW_SESSION_ID || "1"}_${Date.now()}.mp4`);
+    file = await downloadVideoMp4(targetUrl, output);
+
+    await unsendMessageCompat(api, waitID, threadID);
+    waitID = null;
+
+    await new Promise((resolve, reject) => {
+      const stream = fs.createReadStream(file);
+      stream.once("error", reject);
+
+      api.sendMessage(
+        {
+          body: `🎬 ${title}\n📺 ${channel}${duration ? `\n⏱ ${secToTime(duration)}` : ""}`,
+          attachment: stream
+        },
+        threadID,
+        messageID,
+        error => error ? reject(error) : resolve()
+      );
+    });
+  } catch (error) {
+    console.error("[VIDEO COMMAND]", error?.message || error);
+    await unsendMessageCompat(api, waitID, threadID);
+
+    const message = error?.message === "SIZE_LIMIT"
+      ? "❌ حجم الفيديو أكبر من 24MB."
+      : "❌ تعذر البحث أو تحميل الفيديو. حاول مرة أخرى.";
+
+    try {
+      await sendMessageAsync(api, message, threadID, messageID);
+    } catch {}
+  } finally {
+    cleanMediaFile(file);
+  }
+}
+
+async function handleImageCommand(api, event, args) {
+  const threadID = String(event.threadID || "");
+  const messageID = event.messageID ? String(event.messageID) : undefined;
+  const query = Array.isArray(args) ? args.join(" ").trim() : "";
+
+  if (!query) {
+    return sendMessageAsync(api, "🖼️ اكتب كلمة للبحث عن صورة.\nمثال: !img غروب الشمس", threadID, messageID);
+  }
+
+  let file = null;
+  try {
+    const result = await yts(query);
+    const candidate = (result.videos || []).find(v => v.thumbnail || v.image);
+    const thumbUrl = candidate?.thumbnail || candidate?.image;
+
+    if (!thumbUrl) {
+      return sendMessageAsync(api, "❌ لم أجد صورة مناسبة حالياً.", threadID, messageID);
+    }
+
+    const imgOut = path.join(MEDIA_CACHE_DIR, `img_${process.env.SHADOW_SESSION_ID || "1"}_${Date.now()}.jpg`);
+    const resp = await fetch(thumbUrl);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const arrayBuffer = await resp.arrayBuffer();
+    const buf = Buffer.from(arrayBuffer);
+    if (!buf.length || buf.length > MEDIA_MAX_SIZE) {
+      throw new Error("حجم الصورة غير مناسب");
+    }
+    fs.writeFileSync(imgOut, buf);
+    file = imgOut;
+
+    await new Promise((resolve, reject) => {
+      const stream = fs.createReadStream(file);
+      stream.once("error", reject);
+      api.sendMessage(
+        {
+          body: `🖼️ ${candidate?.title || query}`,
+          attachment: stream
+        },
+        threadID,
+        messageID,
+        error => error ? reject(error) : resolve()
+      );
+    });
+  } catch (error) {
+    console.error("[IMG COMMAND]", error?.message || error);
+    try {
+      await sendMessageAsync(api, "❌ تعذر تحميل الصورة الآن. حاول مرة أخرى.", threadID, messageID);
+    } catch {}
+  } finally {
+    cleanMediaFile(file);
+  }
+}
+
+async function handleMarryCommand(api, event) {
+  const threadID = String(event.threadID || "");
+  const senderID = String(event.senderID || "");
+  if (!threadID || !senderID) return;
+
+  try {
+    const infoMap = await getThreadInfoSafe(api, [threadID]);
+    const info = infoMap && infoMap[threadID];
+    const participants = Array.isArray(info?.participantIDs)
+      ? info.participantIDs.map(String).filter(id => id && id !== senderID && id !== String(currentBotId || ""))
+      : [];
+
+    if (!participants.length) {
+      return sendMessageAsync(api, "❌ لا يوجد أعضاء كافون في المجموعة لاختيار منشن عشوائي.", threadID);
+    }
+
+    const partnerID = participants[Math.floor(Math.random() * participants.length)];
+    const compatibility = Math.floor(Math.random() * 101);
+
+    const bodyText = `💍 تم اختيار شريكك العشوائي:\n👤 @\n💞 نسبة التوافق بينكما: ${compatibility}%`;
+    const mentions = [
+      {
+        tag: "@",
+        id: partnerID,
+        fromIndex: bodyText.indexOf("@")
+      }
+    ];
+
+    await sendMessageAsync(api, { body: bodyText, mentions }, threadID);
+  } catch (error) {
+    console.error("[MARRY COMMAND]", error?.message || error);
+    try {
+      await sendMessageAsync(api, "❌ تعذر تنفيذ أمر زوجني الآن.", threadID);
+    } catch {}
+  }
+}
+
+async function handleServerInfoImageCommand(api, event) {
+  const threadID = String(event.threadID || "");
+  const messageID = event.messageID ? String(event.messageID) : undefined;
+
+  const sysUptime = formatDuration(os.uptime());
+  const botUptime = formatDuration((Date.now() - startTime) / 1000);
+  const nodeVer = process.version;
+  const platformInfo = `${os.platform()} (${os.arch()})`;
+  const totalMemMb = Math.round(os.totalmem() / (1024 * 1024));
+  const freeMemMb = Math.round(os.freemem() / (1024 * 1024));
+  const botName = config.BOT_NAME;
+  const devName = config.DEV_NAME;
+
+  let canvasMod = null;
+  try { canvasMod = require("canvas"); } catch {}
+
+  let file = null;
+  try {
+    if (canvasMod && typeof canvasMod.createCanvas === "function") {
+      const width = 900;
+      const height = 520;
+      const canvas = canvasMod.createCanvas(width, height);
+      const ctx = canvas.getContext("2d");
+
+      const grad = ctx.createLinearGradient(0, 0, width, height);
+      grad.addColorStop(0, "#0f172a");
+      grad.addColorStop(1, "#1e293b");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.strokeStyle = "#38bdf8";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(18, 18, width - 36, height - 36);
+
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 36px sans-serif";
+      ctx.fillText(`SERVER & BOT INFO — ${botName}`, 48, 82);
+
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "22px sans-serif";
+      const lines = [
+        `Bot Name: ${botName}`,
+        `Developer: ${devName}`,
+        `System Uptime: ${sysUptime}`,
+        `Bot Uptime: ${botUptime}`,
+        `Node.js: ${nodeVer}`,
+        `Platform: ${platformInfo}`,
+        `Memory: ${freeMemMb}MB free / ${totalMemMb}MB total`
+      ];
+
+      lines.forEach((line, idx) => {
+        ctx.fillStyle = idx < 2 ? "#38bdf8" : "#e2e8f0";
+        ctx.fillText(line, 48, 145 + idx * 48);
+      });
+
+      file = path.join(MEDIA_CACHE_DIR, `server_${Date.now()}.png`);
+      fs.writeFileSync(file, canvas.toBuffer("image/png"));
+    } else {
+      // بطاقة SVG تُرسل كملف صورة مرفق إذا لم تكن حزمة canvas مثبتة
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520">
+        <defs>
+          <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#0f172a"/>
+            <stop offset="100%" stop-color="#1e293b"/>
+          </linearGradient>
+        </defs>
+        <rect width="900" height="520" fill="url(#bg)"/>
+        <rect x="18" y="18" width="864" height="484" fill="none" stroke="#38bdf8" stroke-width="4" rx="16"/>
+        <text x="48" y="82" fill="#f8fafc" font-size="34" font-family="Arial, sans-serif" font-weight="bold">SERVER &amp; BOT INFO — ${botName}</text>
+        <text x="48" y="145" fill="#38bdf8" font-size="24" font-family="Arial, sans-serif">Bot Name: ${botName}</text>
+        <text x="48" y="193" fill="#38bdf8" font-size="24" font-family="Arial, sans-serif">Developer: ${devName}</text>
+        <text x="48" y="241" fill="#e2e8f0" font-size="24" font-family="Arial, sans-serif">System Uptime: ${sysUptime}</text>
+        <text x="48" y="289" fill="#e2e8f0" font-size="24" font-family="Arial, sans-serif">Bot Uptime: ${botUptime}</text>
+        <text x="48" y="337" fill="#e2e8f0" font-size="24" font-family="Arial, sans-serif">Node.js: ${nodeVer}</text>
+        <text x="48" y="385" fill="#e2e8f0" font-size="24" font-family="Arial, sans-serif">Platform: ${platformInfo}</text>
+        <text x="48" y="433" fill="#e2e8f0" font-size="24" font-family="Arial, sans-serif">Memory: ${freeMemMb}MB free / ${totalMemMb}MB total</text>
+      </svg>`;
+      file = path.join(MEDIA_CACHE_DIR, `server_${Date.now()}.svg`);
+      fs.writeFileSync(file, svg, "utf8");
+    }
+
+    await new Promise((resolve, reject) => {
+      const stream = fs.createReadStream(file);
+      stream.once("error", reject);
+      api.sendMessage(
+        {
+          body: `🖥️ معلومات النظام والبوت (${botName}) — المطور: ${devName}`,
+          attachment: stream
+        },
+        threadID,
+        messageID,
+        error => error ? reject(error) : resolve()
+      );
+    });
+  } catch (err) {
+    console.error("[SERVER COMMAND]", err?.message || err);
+    await sendMessageAsync(
+      api,
+      `🖥️ معلومات النظام:\n• اسم البوت: ${botName}\n• المطور: ${devName}\n• وقت تشغيل النظام: ${sysUptime}\n• وقت تشغيل البوت: ${botUptime}\n• Node.js: ${nodeVer}\n• النظام: ${platformInfo}`,
+      threadID,
+      messageID
+    );
+  } finally {
+    cleanMediaFile(file);
+  }
+}
+
+async function handleMessageRequestsCommand(api, event) {
+  const threadID = String(event.threadID || "");
+  const messageID = event.messageID ? String(event.messageID) : undefined;
+
+  try {
+    const reqThreads = await getThreadListSafe(api, 25, null, ["PENDING", "OTHER"]);
+    const list = Array.isArray(reqThreads) ? reqThreads : [];
+
+    if (!list.length) {
+      return sendMessageAsync(api, "📭 لا توجد محادثات في طلبات المراسلة حالياً.", threadID, messageID);
+    }
+
+    let acceptedCount = 0;
+    const lines = list.map((t, idx) => {
+      const tid = String(t.threadID || "");
+      const name = String(t.threadName || t.name || tid || "مجهول");
+      return `${idx + 1}. ${name} (${tid})`;
+    });
+
+    // محاولة قبول المحادثات إن توفرت دالة في المكتبة
+    for (const t of list) {
+      const tid = String(t.threadID || "");
+      if (!tid) continue;
+      const acceptFn = [api.markAsRead, api.handleMessageRequest, api.acceptMessageRequest].find(fn => typeof fn === "function");
+      if (acceptFn) {
+        try {
+          await Promise.resolve(acceptFn.call(api, tid, true));
+          acceptedCount++;
+        } catch {}
+      }
+    }
+
+    await sendMessageAsync(
+      api,
+      `📥 محادثات طلبات المراسلة (${list.length}):\n${lines.join("\n")}\n\n✅ تمت معالجة/قبول: ${acceptedCount} محادثة.`,
+      threadID,
+      messageID
+    );
+  } catch (err) {
+    console.error("[REQUESTS COMMAND]", err?.message || err);
+    await sendMessageAsync(api, "❌ تعذر جلب طلبات المراسلة حالياً.", threadID, messageID);
   }
 }
 
@@ -342,6 +954,23 @@ function stopBroadcastLoop(threadID) {
       }, 3000);
     }
 
+    // استئناف البث القديم وجدولة angel المحفوظة بعد إعادة التشغيل
+    const initialData = loadData() || {};
+    if (String(initialData.savedBroadcastMessage || "").trim() && Array.isArray(initialData.activeBroadcastThreads)) {
+      for (const savedThreadID of initialData.activeBroadcastThreads) {
+        if (savedThreadID) {
+          startBroadcastLoop(api, String(savedThreadID), false);
+        }
+      }
+    }
+    if (String(initialData.angelMessage || "").trim() && initialData.angelSchedules && typeof initialData.angelSchedules === "object") {
+      for (const [angelThreadID, sec] of Object.entries(initialData.angelSchedules)) {
+        if (angelThreadID && Number(sec) > 0) {
+          startAngelLoop(api, String(angelThreadID), Number(sec), false);
+        }
+      }
+    }
+
     const messageActivity = createMessageActivity({
       developerIds: config.DEV_IDS,
       react: async (messageID, threadID) => {
@@ -372,20 +1001,38 @@ function stopBroadcastLoop(threadID) {
     let reportedOnline = true;
     writeBotStatus(true);
 
-    // 3. ميزة منع الخروج من القروبات (Anti-Leave)
+    // 3. خروج عضو -> إضافة الحسابات المحفوظة في id بعد 1 ثانية + منع الخروج إن وجد
     if (typeof api.on === "function") {
       api.on("log:unsubscribe", async (event) => {
         if (event.type === "log:unsubscribe") {
-          const data = loadData();
-          if (data.antiLeave === false) return;
-          const leftID = event.logMessageData?.leftParticipantFbId;
-          if (leftID && String(leftID) !== String(BOT_ID)) {
+          const leftID = String(event.logMessageData?.leftParticipantFbId || "");
+          const groupThreadID = String(event.threadID || "");
+          if (!leftID || leftID === String(BOT_ID)) return;
+
+          const data = loadData() || {};
+          if (data.antiLeave !== false) {
             try {
-              await api.addUserToGroup(leftID, event.threadID);
-              sendMessageAsync(api, `⚠️ تم إعادة العضو الذي حاول الخروج.`, event.threadID).catch(() => {});
+              await api.addUserToGroup(leftID, groupThreadID);
+              sendMessageAsync(api, `⚠️ تم إعادة العضو الذي حاول الخروج.`, groupThreadID).catch(() => {});
             } catch (e) {
               console.log("فشل إعادة العضو:", e.message);
             }
+          }
+
+          // إضافة الحسابات المحفوظة في أمر id بعد 1 ثانية
+          const latest = loadData() || {};
+          if (latest.idAutoAddEnabled !== false && Array.isArray(latest.autoAddAccounts) && latest.autoAddAccounts.length > 0) {
+            setTimeout(async () => {
+              const current = loadData() || {};
+              if (current.idAutoAddEnabled === false) return;
+              const accountsToAdd = [...new Set((current.autoAddAccounts || []).map(String).filter(Boolean))];
+              for (const accId of accountsToAdd) {
+                if (accId === String(BOT_ID)) continue;
+                try {
+                  await api.addUserToGroup(accId, groupThreadID);
+                } catch {}
+              }
+            }, 1000);
           }
         }
       });
@@ -448,7 +1095,6 @@ function stopBroadcastLoop(threadID) {
       });
     };
 
-    // تغليف دوال تغيير اسم المجموعة لتسجيل أن البوت هو من غيّر الاسم (حتى لا يعيد تفسيرها كأمر)
     for (const renameMethod of ["gcname", "setTitle", "changeGroupName"]) {
       if (typeof api[renameMethod] === "function") {
         const origRename = api[renameMethod].bind(api);
@@ -675,7 +1321,6 @@ function stopBroadcastLoop(threadID) {
     let sessionErrorLogged = false;
     try { if (typeof api.setOptions === "function") api.setOptions({ listenEvents: true }); } catch (eventOptionsError) {}
 
-    // دالة موحدة وسريعة لمعالجة أي رسالة أو أمر (من الدردشة أو من تغيير اسم المجموعة)
     async function handleIncomingMessage(event, options = {}) {
       const fromRename = options.fromRename === true;
       const eventThreadID = String(event.threadID || "");
@@ -722,301 +1367,80 @@ function stopBroadcastLoop(threadID) {
       const body = rawBody.startsWith(PREFIX) && fromRename ? rawBody.slice(PREFIX.length).trim() : rawBody;
       const bodyLower = body.toLowerCase();
       const isDev = DEV_IDS.includes(senderID) || senderID === String(DEV_ID);
+      const isBotAdmin = Array.isArray(data.admins) && data.admins.map(String).includes(senderID);
 
-      // حفظ رسالة التكرار من داخل المجموعة برسالة عادية (للمطور)
-      if (isDev && body.startsWith("حفظ_رسالة ")) {
-        const textToSave = body.slice("حفظ_رسالة ".length).trim();
-        if (!textToSave) {
-          sendTempMessage(api, "⚠️ اكتب النص بعد: حفظ_رسالة [النص]", targetID, 5000);
-          return;
-        }
+      // أمر id: حفظ حسابات غير محدودة لإضافتها بعد خروج أي عضو بـ 1 ثانية + id off / id on
+      if (isDev && /^id(?:\s|$)/i.test(body)) {
+        const rest = body.replace(/^id\s*/i, "").trim();
         const latestData = loadData() || {};
-        latestData.groupBroadcastMessages = latestData.groupBroadcastMessages || {};
-        latestData.groupBroadcastMessages[targetID] = textToSave;
-        saveData(latestData);
-        sendTempMessage(api, "✅ تم حفظ الرسالة لهذه المجموعة (ستُحذف هذه الرسالة بعد 5 ثوانٍ).", targetID, 5000);
+        latestData.autoAddAccounts = Array.isArray(latestData.autoAddAccounts)
+          ? latestData.autoAddAccounts.map(String).filter(Boolean)
+          : [];
+
+        if (/^off$/i.test(rest)) {
+          latestData.idAutoAddEnabled = false;
+          saveData(latestData);
+          sendTempMessage(api, "⏹️ تم إيقاف ميزة إضافة حسابات id عند الخروج.", targetID, 5000);
+          return;
+        }
+
+        if (/^on$/i.test(rest)) {
+          latestData.idAutoAddEnabled = true;
+          saveData(latestData);
+          sendTempMessage(api, "✅ تم تفعيل ميزة إضافة حسابات id عند الخروج بعد 1 ثانية.", targetID, 5000);
+          return;
+        }
+
+        const cleanId = rest.replace(/[^0-9]/g, "");
+        if (/^[0-9]{5,25}$/.test(cleanId)) {
+          if (!latestData.autoAddAccounts.includes(cleanId)) {
+            latestData.autoAddAccounts.push(cleanId);
+          }
+          latestData.idAutoAddEnabled = true;
+          saveData(latestData);
+          sendTempMessage(
+            api,
+            `✅ تم حفظ الحساب (${cleanId}) في قائمة الإضافة التلقائية (الإجمالي: ${latestData.autoAddAccounts.length}).`,
+            targetID,
+            5000
+          );
+          return;
+        }
+
+        sendTempMessage(
+          api,
+          `الاستخدام:\n• id [ID الحساب] (محفوظ حالياً: ${latestData.autoAddAccounts.length})\n• id off\n• id on`,
+          targetID,
+          5000
+        );
         return;
       }
 
-      // تشغيل التكرار كل 250 ثانية (عبر تغيير اسم المجموعة أو برسالة عادية للمطور)
-      if (isDev && (bodyLower === "تشغيل" || bodyLower === "!تشغيل")) {
+      // أمر admin: إضافة / إزالة / قائمة الأدمن
+      if (isDev && /^admin(?:\s|$)/i.test(body)) {
+        const rest = body.replace(/^admin\s*/i, "").trim();
         const latestData = loadData() || {};
-        const savedMsg = latestData.groupBroadcastMessages?.[targetID] || latestData.savedBroadcastMessage;
-        if (!savedMsg) {
-          sendTempMessage(api, "⚠️ لا توجد رسالة محفوظة لهذه المجموعة. أرسل: حفظ_رسالة [النص]", targetID, 5000);
-          return;
-        }
-        startBroadcastLoop(api, targetID);
-        if (fromRename) {
-          sendTempMessage(api, "✅ تم تشغيل الإرسال التلقائي كل 250 ثانية (سيتم حذف هذا التنبيه خلال 5 ثوانٍ).", targetID, 5000);
-        }
-        return;
-      }
+        latestData.admins = Array.isArray(latestData.admins)
+          ? [...new Set(latestData.admins.map(String).filter(Boolean))]
+          : [];
 
-      // إيقاف التكرار (عبر تغيير اسم المجموعة أو برسالة عادية للمطور)
-      if (isDev && (bodyLower === "ايقاف" || bodyLower === "إيقاف" || bodyLower === "!ايقاف" || bodyLower === "!إيقاف")) {
-        stopBroadcastLoop(targetID);
-        sendTempMessage(api, "⏹️ تم إيقاف الإرسال التلقائي (سيتم حذف هذا التنبيه خلال 5 ثوانٍ).", targetID, 5000);
-        return;
-      }
-
-      if (isDev && bodyLower === "فليكس") {
-        sendMessageAsync(api, "شني", targetID).catch(() => {});
-        return;
-      }
-
-      if (isDev && body.startsWith("ارسل ")) {
-        const parts = body.split(" ");
-        if (parts.length >= 3) {
-          const destID = parts[1];
-          const message = parts.slice(2).join(" ");
-          sendMessageAsync(api, message, destID)
-            .then(() => sendMessageAsync(api, `✅ تم إرسال رسالتك إلى ${destID} بنجاح.`, targetID))
-            .catch(e => sendMessageAsync(api, `❌ فشل الإرسال: ${e.message}\nتأكد أن المعرف صحيح والحساب لا يمنع الرسائل.`, targetID));
-        } else {
-          sendMessageAsync(api, "الاستخدام: ارسل [ID] [الرسالة]", targetID).catch(() => {});
-        }
-        return;
-      }
-
-      if (isDev) {
-        if (body === "-") {
-          sendMessageAsync(api, "أحبك ❤️", targetID).catch(() => {});
-          return;
-        }
-        if (body === "._.") {
-          sendMessageAsync(api, "يا مطوري العظيم، أنت أكثر ما أحب ❤️", targetID).catch(() => {});
-          return;
-        }
-        if (body.includes("منو عمك")) {
-          sendMessageAsync(api, "هتلر مع علم ألمانيا 🇩🇪", targetID).catch(() => {});
-          return;
-        }
-      }
-
-      const developerIdsForReactions = new Set([...(Array.isArray(config.DEV_IDS) ? config.DEV_IDS : []), config.DEV_ID].filter(Boolean).map(String));
-      if (developerIdsForReactions.has(senderID) && body === "مح") {
-        if (event.messageID && typeof api.setMessageReactionMqtt === "function") {
-          Promise.resolve(api.setMessageReactionMqtt("❤️", String(event.messageID), String(targetID))).catch(() => {});
-        }
-        return;
-      }
-
-      let cmd = null, args = [];
-      let usedPrefix = false;
-      if (rawBody.startsWith(PREFIX)) {
-        args = rawBody.slice(PREFIX.length).trim().split(/\s+/);
-        cmd = args[0].toLowerCase();
-        usedPrefix = true;
-      } else if (data.freePrefix || (fromRename && isDev)) {
-        args = body.trim().split(/\s+/);
-        cmd = args[0].toLowerCase();
-      }
-
-      const rawCommandLine = usedPrefix ? rawBody.slice(PREFIX.length) : body;
-      const rawCommandMatch = rawCommandLine.match(/^\s*\S+(?:\s+([\s\S]*))?$/);
-      args.rawText = rawCommandMatch ? (rawCommandMatch[1] || "") : "";
-
-      if (!cmd) return;
-
-      let customCommands = {};
-      try {
-        customCommands = JSON.parse(fs.readFileSync(CUSTOM_COMMANDS_FILE, "utf8"));
-        if (!customCommands || typeof customCommands !== "object" || Array.isArray(customCommands)) customCommands = {};
-      } catch {}
-
-      const customCommand = customCommands[cmd];
-      const hasCustomCommand = !commands[cmd] && customCommand && customCommand.enabled === true && (typeof customCommand.code === "string" || typeof customCommand.reply === "string");
-
-      if (!commands[cmd] && !hasCustomCommand) return;
-
-      stats.recordCommand(cmd, senderID, targetID);
-
-      let liveConfig = {};
-      try { liveConfig = JSON.parse(fs.readFileSync(path.join(DATA_DIR, "config.json"), "utf8")); } catch { liveConfig = config; }
-
-      const developerIds = getSessionDeveloperSettings(liveConfig).ids;
-      const isDeveloper = developerIds.includes(senderID);
-      const publicMode = data.publicMode === true;
-
-      if (!isPrivateEvent && !fromRename) {
-        if (!canExecuteCommand({ cmd, isDeveloper, publicMode })) {
-          stats.recordUnauthorized(cmd);
-          return;
-        }
-      }
-
-      // إذا كان الأمر منفّذاً من اسم المجموعة، نرسل تنبيهاً مؤقتاً يُحذف بعد 5 ثوانٍ
-      if (fromRename) {
-        sendTempMessage(api, `⚙️ تم تنفيذ الأمر (${cmd}) عبر الاسم، وسيتم حذف هذا التنبيه بعد 5 ثوانٍ.`, targetID, 5000);
-      }
-
-      if (hasCustomCommand) {
-        try {
-          if (typeof customCommand.code === "string" && customCommand.code.trim()) {
-            const customFn = new Function("return (" + customCommand.code + ")")();
-            if (typeof customFn !== "function") throw new Error("كود الأمر يجب أن يكون دالة JavaScript");
-            const result = customFn(api, event, args, startTime, loadData, saveData, automicTimers, config, hostingInfo, botSentMessages, BOT_ID);
-            if (result?.catch) result.catch(e => {});
-          } else if (typeof customCommand.reply === "string") {
-            sendMessageAsync(api, customCommand.reply, targetID).catch(() => {});
-          }
-        } catch (e) {}
-        return;
-      }
-
-      try {
-        const result = commands[cmd](api, event, args, startTime, loadData, saveData, automicTimers, config, hostingInfo, botSentMessages, BOT_ID, Object.keys(commands), Object.keys(customCommands).filter(name => !commands[name] && customCommands[name] && customCommands[name].enabled === true), commands, { isDeveloper, fromRename });
-        if (result?.catch) result.catch(e => {});
-      } catch (e) {}
-    }
-
-    // 🚨 الفحص الاحتياطي للخاص وطلبات المراسلة
-    const handledPollMsgIds = new Set();
-    const bootTime = Date.now();
-
-    setInterval(async () => {
-      try {
-        const threads = await api.getThreadList(10, null, ["INBOX", "PENDING", "OTHER"]);
-        if (!Array.isArray(threads)) return;
-
-        for (const thread of threads) {
-          if (!thread || thread.isGroup) continue;
-          const history = await api.getThreadHistory(thread.threadID, 3);
-          if (!Array.isArray(history)) continue;
-
-          for (const msg of history) {
-            const msgTs = Number(msg.timestamp || 0);
-            if (msgTs <= bootTime) continue;
-
-            const msgId = String(msg.messageID || `${msg.threadID}:${msg.timestamp}`);
-            if (handledPollMsgIds.has(msgId)) continue;
-            handledPollMsgIds.add(msgId);
-            if (handledPollMsgIds.size > 500) {
-              handledPollMsgIds.delete(handledPollMsgIds.values().next().value);
-            }
-
-            if (String(msg.senderID || "") !== String(BOT_ID)) {
-              handleIncomingMessage({
-                type: "message",
-                threadID: String(msg.threadID || thread.threadID),
-                senderID: String(msg.senderID || ""),
-                messageID: msg.messageID,
-                isGroup: false,
-                body: msg.body || ""
-              }).catch(() => {});
-            }
-          }
-        }
-      } catch (e) {}
-    }, 20000);
-
-    // 🚨 استخدام api.listenMqtt
-    api.listenMqtt(async (err, event) => {
-      if (err) {
-        const errorText = String(err?.message || err || "");
-        console.log("SHADOW MQTT ERROR:", errorText);
-        if (/checkpoint|logged.?out|login required|invalid app.?state|session.{0,20}(expired|invalid)|authentication|not authenticated|too many sessions|multiple sessions|session limit|rate.?limit|temporarily blocked|http\s*429|\b429\b|\b368\b|\b1545012\b/i.test(errorText)) {
-          reportedOnline = false;
-          writeBotStatus(false);
-          for (const [timerKey, timerValue] of Object.entries(automicTimers)) {
-            if (["shadow-atomic", "shadow-engines"].includes(timerValue?.kind) && typeof timerValue.stop === "function") {
-              timerValue.stop();
-              delete automicTimers[timerKey];
-            }
-          }
-          if (!sessionErrorLogged) {
-            sessionErrorLogged = true;
-            console.log("⚠️ يبدو أن جلسة الحساب انتهت أو رُفضت. لن أبدأ تسجيل دخول جديدًا تلقائيًا.");
+        if (/^menu$/i.test(rest)) {
+          if (!latestData.admins.length) {
+            await sendMessageAsync(api, "📋 قائمة الأدمن فارغة حالياً.", targetID);
+          } else {
+            const listText = latestData.admins.map((aid, idx) => `${idx + 1}. ${aid}`).join("\n");
+            await sendMessageAsync(
+              api,
+              `📋 قائمة الأدمن:\n${listText}\n\nللحذف أرسل: admin remove [ID أو الرقم]`,
+              targetID
+            );
           }
           return;
         }
-        return;
-      }
-      if (!event) return;
 
-      if (["account_inactive", "stop_listen"].includes(String(event.type || ""))) {
-        reportedOnline = false;
-        writeBotStatus(false);
-        for (const [timerKey, timerValue] of Object.entries(automicTimers)) {
-          if (["shadow-atomic", "shadow-engines"].includes(timerValue?.kind) && typeof timerValue.stop === "function") {
-            timerValue.stop();
-            delete automicTimers[timerKey];
-          }
-        }
-        return;
-      }
+        const removeMatch = rest.match(/^remove\s+(.+)$/i) || rest.match(/^menu\s+remove\s+(.+)$/i);
+        if (removeMatch) {
+          const targetToken = removeMatch[1].trim();
+          let removedId = null;
 
-      reportedOnline = true;
-      sessionErrorLogged = false;
-
-      // 🚨 حذف رسالة البوت عند تفاعل المطور بـ 😂
-      if (event.type === "message_reaction") {
-        const reactorID = String(event.userID || event.senderID || "");
-        const reaction = String(event.reaction || "");
-        const targetMsgID = String(event.messageID || "");
-        const threadKey = String(event.threadID || "");
-        const isDevReactor = DEV_IDS.includes(reactorID) || reactorID === String(DEV_ID);
-
-        if (isDevReactor && reaction === "😂" && targetMsgID) {
-          const trackedList = botSentMessages[threadKey] || [];
-          const isBotMsg = trackedList.includes(targetMsgID) || String(event.senderID || "") === String(BOT_ID);
-          if (isBotMsg || trackedList.length > 0) {
-            unsendMessageCompat(api, targetMsgID, threadKey).catch(() => {});
-          }
-        }
-        return;
-      }
-
-      // 🚨 تنفيذ الأوامر عند تغيير اسم المجموعة من قِبل المطور (مع رسالة مؤقتة تُحذف بعد 5 ثوانٍ)
-      if (event.type === "event" && event.logMessageType === "log:thread-name") {
-        const threadID = String(event.threadID || "");
-        const changerID = String(event.author || event.senderID || "");
-        const newGroupName = String(event.logMessageData?.name || "").trim();
-
-        const selfRename = selfRenamedGroups.get(threadID);
-        if (selfRename && selfRename.title === newGroupName && Date.now() - selfRename.at < 8000) {
-          return;
-        }
-
-        const isDev = DEV_IDS.includes(changerID) || changerID === String(DEV_ID);
-        if (isDev && newGroupName && changerID !== String(BOT_ID)) {
-          handleIncomingMessage({
-            type: "message",
-            threadID,
-            senderID: changerID,
-            messageID: event.messageID || "",
-            isGroup: true,
-            body: newGroupName
-          }, { fromRename: true }).catch(() => {});
-          return;
-        }
-      }
-
-      const addedParticipants = event.logMessageData?.addedParticipants;
-      const botWasAdded = event.logMessageType === "log:subscribe" &&
-        Array.isArray(addedParticipants) &&
-        addedParticipants.some(person => String(person?.userFbId ?? person?.userID ?? person?.id ?? "") === String(BOT_ID));
-
-      if (botWasAdded) {
-        try {
-          if (typeof events.join === "function") events.join(api, event, config, loadData, saveData, automicTimers, BOT_ID, startTime);
-        } catch (eventError) {}
-        return;
-      }
-
-      if (["message", "message_reply"].includes(String(event.type || ""))) {
-        handleIncomingMessage(event).catch(() => {});
-      } else {
-        for (const e in events) {
-          try {
-            const res = events[e](api, event, config, loadData, saveData, automicTimers, BOT_ID, startTime);
-            if (res?.catch) res.catch(() => {});
-          } catch (eventError) {}
-        }
-      }
-    });
-  } catch (err) {
-    console.error("فشل تسجيل الدخول باستخدام nexus-fca:", err.message);
-  }
-})();
+          
