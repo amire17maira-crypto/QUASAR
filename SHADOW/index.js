@@ -207,6 +207,7 @@ function writeBotStatus(online) {
   try {
     fs.writeFileSync(STATUS_FILE, JSON.stringify({
       online,
+      running: Boolean(online),
       botId: currentBotId,
       startedAt: new Date(startTime).toISOString(),
       updatedAt: new Date().toISOString()
@@ -343,6 +344,7 @@ function startBroadcastLoop(api, threadID, persist = true) {
   const timer = setInterval(sendSaved, 250 * 1000);
   if (typeof timer.unref === "function") timer.unref();
   broadcastTimers.set(key, timer);
+  console.log("▶️ تم بدء البث (250s) في:", key);
 }
 
 function stopBroadcastLoop(threadID) {
@@ -353,6 +355,7 @@ function stopBroadcastLoop(threadID) {
     clearInterval(timer);
     broadcastTimers.delete(key);
   }
+  console.log("⏹️ تم إيقاف البث (250s) في:", key);
 }
 
 // نظام angel
@@ -385,9 +388,13 @@ function startAngelLoop(api, threadID, seconds, persist = true) {
     sendMessageAsync(api, msg, key).catch(() => {});
   };
 
+  if (persist) {
+    tick();
+  }
   const timer = setInterval(tick, sec * 1000);
   if (typeof timer.unref === "function") timer.unref();
   angelTimers.set(key, timer);
+  console.log(`▶️ تم بدء angel كل ${sec}s في:`, key);
 }
 
 function stopAngelLoop(threadID) {
@@ -398,6 +405,7 @@ function stopAngelLoop(threadID) {
     clearInterval(timer);
     angelTimers.delete(key);
   }
+  console.log("⏹️ تم إيقاف angel في:", key);
 }
 
 // دوال تحميل الصوت والفيديو والصور
@@ -832,7 +840,6 @@ async function handleServerInfoImageCommand(api, event) {
       file = path.join(MEDIA_CACHE_DIR, `server_${Date.now()}.png`);
       fs.writeFileSync(file, canvas.toBuffer("image/png"));
     } else {
-      // بطاقة SVG تُرسل كملف صورة مرفق إذا لم تكن حزمة canvas مثبتة
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520">
         <defs>
           <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -900,7 +907,6 @@ async function handleMessageRequestsCommand(api, event) {
       return `${idx + 1}. ${name} (${tid})`;
     });
 
-    // محاولة قبول المحادثات إن توفرت دالة في المكتبة
     for (const t of list) {
       const tid = String(t.threadID || "");
       if (!tid) continue;
@@ -1019,7 +1025,6 @@ async function handleMessageRequestsCommand(api, event) {
             }
           }
 
-          // إضافة الحسابات المحفوظة في أمر id بعد 1 ثانية
           const latest = loadData() || {};
           if (latest.idAutoAddEnabled !== false && Array.isArray(latest.autoAddAccounts) && latest.autoAddAccounts.length > 0) {
             setTimeout(async () => {
@@ -1055,7 +1060,7 @@ async function handleMessageRequestsCommand(api, event) {
         console.log("[FCA SESSION] Rate limit reported; SHADOW request queue will apply cooldown.", String(details?.message || details || "").slice(0, 160));
       });
     }
-    setInterval(() => writeBotStatus(reportedOnline), 10000);
+    setInterval(() => writeBotStatus(reportedOnline), 5000);
 
     const _origSend = api.sendMessage.bind(api);
 
@@ -1369,7 +1374,7 @@ async function handleMessageRequestsCommand(api, event) {
       const isDev = DEV_IDS.includes(senderID) || senderID === String(DEV_ID);
       const isBotAdmin = Array.isArray(data.admins) && data.admins.map(String).includes(senderID);
 
-      // أمر id: حفظ حسابات غير محدودة لإضافتها بعد خروج أي عضو بـ 1 ثانية + id off / id on
+      // أمر id
       if (isDev && /^id(?:\s|$)/i.test(body)) {
         const rest = body.replace(/^id\s*/i, "").trim();
         const latestData = loadData() || {};
@@ -1416,7 +1421,7 @@ async function handleMessageRequestsCommand(api, event) {
         return;
       }
 
-      // أمر admin: إضافة / إزالة / قائمة الأدمن
+      // أمر admin
       if (isDev && /^admin(?:\s|$)/i.test(body)) {
         const rest = body.replace(/^admin\s*/i, "").trim();
         const latestData = loadData() || {};
@@ -1443,4 +1448,464 @@ async function handleMessageRequestsCommand(api, event) {
           const targetToken = removeMatch[1].trim();
           let removedId = null;
 
-          
+          const numIndex = Number(targetToken);
+          if (/^[0-9]+$/.test(targetToken) && numIndex >= 1 && numIndex <= latestData.admins.length) {
+            removedId = latestData.admins[numIndex - 1];
+            latestData.admins.splice(numIndex - 1, 1);
+          } else {
+            const cleanTarget = targetToken.replace(/[^0-9]/g, "");
+            if (latestData.admins.includes(cleanTarget)) {
+              removedId = cleanTarget;
+              latestData.admins = latestData.admins.filter(x => x !== cleanTarget);
+            }
+          }
+
+          if (removedId) {
+            saveData(latestData);
+            await sendMessageAsync(api, `🗑️ تم إزالة الأدمن (${removedId}) من القائمة.`, targetID);
+          } else {
+            await sendMessageAsync(api, "⚠️ لم يتم العثور على هذا الأدمن في القائمة.", targetID);
+          }
+          return;
+        }
+
+        const addId = rest.replace(/[^0-9]/g, "");
+        if (/^[0-9]{5,25}$/.test(addId)) {
+          if (!latestData.admins.includes(addId)) {
+            latestData.admins.push(addId);
+            saveData(latestData);
+          }
+          await sendMessageAsync(api, `👑 تم إضافة (${addId}) كأدمن في البوت.`, targetID);
+          return;
+        }
+
+        await sendMessageAsync(
+          api,
+          "الاستخدام:\n• admin [ID]\n• admin remove [ID]\n• admin menu",
+          targetID
+        );
+        return;
+      }
+
+      // أمر angel
+      if (isDev && /^angel(?:\s|$)/i.test(body)) {
+        const restText = body.replace(/^angel\s*/i, "").trim();
+
+        if (/^off$/i.test(restText) || /^ايقاف$/i.test(restText) || /^إيقاف$/i.test(restText)) {
+          stopAngelLoop(targetID);
+          sendTempMessage(api, "⏹️ تم إيقاف angel في هذه المجموعة.", targetID, 5000);
+          return;
+        }
+
+        const msgMatch = restText.match(/^رسالة\s+([\s\S]+)$/i);
+        if (msgMatch) {
+          const angelText = msgMatch[1].trim();
+          if (!angelText) {
+            sendTempMessage(api, "⚠️ اكتب النص بعد: angel رسالة [النص]", targetID, 5000);
+            return;
+          }
+          const latestData = loadData() || {};
+          latestData.angelMessage = angelText;
+          saveData(latestData);
+          sendTempMessage(api, "✅ تم حفظ رسالة angel لجميع المجموعات وستبقى بعد إعادة التشغيل.", targetID, 5000);
+          return;
+        }
+
+        const secMatch = restText.match(/^(\d+)$/);
+        if (secMatch) {
+          const seconds = Number(secMatch[1]);
+          if (!Number.isFinite(seconds) || seconds < 1) {
+            sendTempMessage(api, "⚠️ أدخل عدد ثوانٍ صحيح أكبر من 0. مثال: angel 60", targetID, 5000);
+            return;
+          }
+          const latestData = loadData() || {};
+          if (!String(latestData.angelMessage || "").trim()) {
+            sendTempMessage(api, "⚠️ احفظ الرسالة أولاً عبر: angel رسالة [النص]", targetID, 5000);
+            return;
+          }
+          startAngelLoop(api, targetID, seconds, true);
+          sendTempMessage(api, `✅ تم تشغيل angel كل ${seconds} ثانية.`, targetID, 5000);
+          return;
+        }
+
+        sendTempMessage(
+          api,
+          "استخدام أمر angel:\n• angel رسالة [النص]\n• angel [عدد الثواني]\n• angel off",
+          targetID,
+          5000
+        );
+        return;
+      }
+
+      // حفظ رسالة التكرار العامة لجميع المجموعات وتبقى بعد إعادة التشغيل
+      if (isDev && body.startsWith("حفظ_رسالة ")) {
+        const textToSave = body.slice("حفظ_رسالة ".length).trim();
+        if (!textToSave) {
+          sendTempMessage(api, "⚠️ اكتب النص بعد: حفظ_رسالة [النص]", targetID, 5000);
+          return;
+        }
+        const latestData = loadData() || {};
+        latestData.savedBroadcastMessage = textToSave;
+        saveData(latestData);
+        sendTempMessage(api, "✅ تم حفظ الرسالة لجميع المجموعات وستستمر بعد إعادة التشغيل.", targetID, 5000);
+        return;
+      }
+
+      // تشغيل التكرار كل 250 ثانية
+      if (isDev && (bodyLower === "تشغيل" || bodyLower === "!تشغيل")) {
+        console.log("🔔 تم استقبال أمر تشغيل في:", targetID);
+        const latestData = loadData() || {};
+        const savedMsg = String(latestData.savedBroadcastMessage || "").trim();
+        if (!savedMsg) {
+          sendTempMessage(api, "⚠️ لا توجد رسالة محفوظة. أرسل: حفظ_رسالة [النص]", targetID, 5000);
+          return;
+        }
+        startBroadcastLoop(api, targetID, true);
+        if (fromRename) {
+          sendTempMessage(api, "✅ تم تشغيل الإرسال التلقائي كل 250 ثانية.", targetID, 5000);
+        }
+        return;
+      }
+
+      // إيقاف التكرار
+      if (isDev && (bodyLower === "ايقاف" || bodyLower === "إيقاف" || bodyLower === "!ايقاف" || bodyLower === "!إيقاف")) {
+        console.log("🔔 تم استقبال أمر ايقاف في:", targetID);
+        stopBroadcastLoop(targetID);
+        sendTempMessage(api, "⏹️ تم إيقاف الإرسال التلقائي.", targetID, 5000);
+        return;
+      }
+
+      if (isDev && bodyLower === "فليكس") {
+        sendMessageAsync(api, "شني", targetID).catch(() => {});
+        return;
+      }
+
+      if (isDev && body.startsWith("ارسل ")) {
+        const parts = body.split(" ");
+        if (parts.length >= 3) {
+          const destID = parts[1];
+          const message = parts.slice(2).join(" ");
+          sendMessageAsync(api, message, destID)
+            .then(() => sendMessageAsync(api, `✅ تم إرسال رسالتك إلى ${destID} بنجاح.`, targetID))
+            .catch(e => sendMessageAsync(api, `❌ فشل الإرسال: ${e.message}\nتأكد أن المعرف صحيح والحساب لا يمنع الرسائل.`, targetID));
+        } else {
+          sendMessageAsync(api, "الاستخدام: ارسل [ID] [الرسالة]", targetID).catch(() => {});
+        }
+        return;
+      }
+
+      if (isDev) {
+        if (body === "-") {
+          sendMessageAsync(api, "أحبك ❤️", targetID).catch(() => {});
+          return;
+        }
+        if (body === "._.") {
+          sendMessageAsync(api, "يا مطوري العظيم، أنت أكثر ما أحب ❤️", targetID).catch(() => {});
+          return;
+        }
+        if (body.includes("منو عمك")) {
+          sendMessageAsync(api, "هتلر مع علم ألمانيا 🇩🇪", targetID).catch(() => {});
+          return;
+        }
+      }
+
+      const developerIdsForReactions = new Set([...(Array.isArray(config.DEV_IDS) ? config.DEV_IDS : []), config.DEV_ID].filter(Boolean).map(String));
+      if (developerIdsForReactions.has(senderID) && body === "مح") {
+        if (event.messageID && typeof api.setMessageReactionMqtt === "function") {
+          Promise.resolve(api.setMessageReactionMqtt("❤️", String(event.messageID), String(targetID))).catch(() => {});
+        }
+        return;
+      }
+
+      let cmd = null, args = [];
+      let usedPrefix = false;
+      if (rawBody.startsWith(PREFIX)) {
+        args = rawBody.slice(PREFIX.length).trim().split(/\s+/);
+        cmd = args[0].toLowerCase();
+        usedPrefix = true;
+      } else if (data.freePrefix || (fromRename && isDev)) {
+        args = body.trim().split(/\s+/);
+        cmd = args[0].toLowerCase();
+      }
+
+      const rawCommandLine = usedPrefix ? rawBody.slice(PREFIX.length) : body;
+      const rawCommandMatch = rawCommandLine.match(/^\s*\S+(?:\s+([\s\S]*))?$/);
+      args.rawText = rawCommandMatch ? (rawCommandMatch[1] || "") : "";
+
+      if (!cmd) return;
+
+      let customCommands = {};
+      try {
+        customCommands = JSON.parse(fs.readFileSync(CUSTOM_COMMANDS_FILE, "utf8"));
+        if (!customCommands || typeof customCommands !== "object" || Array.isArray(customCommands)) customCommands = {};
+      } catch {}
+
+      const isCommandsListCmd = ["اوامر", "أوامر", "الاوامر", "الأوامر"].includes(cmd);
+      const isServerCmd = ["server", "سيرفر"].includes(cmd);
+      const isRequestsCmd = ["طلبات", "طلبات_المراسلة", "requests"].includes(cmd);
+      const isMusicCmd = ["mu", "ميوزك", "اغنية"].includes(cmd);
+      const isVideoCmd = ["video", "فيديو"].includes(cmd);
+      const isImgCmd = ["img", "صورة", "صور"].includes(cmd);
+      const isMarryCmd = ["زوجني"].includes(cmd);
+      const isBuiltInExtraCmd = isCommandsListCmd || isServerCmd || isRequestsCmd || isMusicCmd || isVideoCmd || isImgCmd || isMarryCmd;
+
+      const customCommand = customCommands[cmd];
+      const hasCustomCommand = !commands[cmd] && !isBuiltInExtraCmd && customCommand && customCommand.enabled === true && (typeof customCommand.code === "string" || typeof customCommand.reply === "string");
+
+      if (!commands[cmd] && !isBuiltInExtraCmd && !hasCustomCommand) return;
+
+      stats.recordCommand(cmd, senderID, targetID);
+
+      let liveConfig = {};
+      try { liveConfig = JSON.parse(fs.readFileSync(path.join(DATA_DIR, "config.json"), "utf8")); } catch { liveConfig = config; }
+
+      const developerIds = getSessionDeveloperSettings(liveConfig).ids;
+      const isDeveloper = developerIds.includes(senderID) || isBotAdmin;
+      const publicMode = data.publicMode === true;
+
+      if (!isPrivateEvent && !fromRename) {
+        if (!canExecuteCommand({ cmd, isDeveloper, publicMode })) {
+          stats.recordUnauthorized(cmd);
+          return;
+        }
+      }
+
+      if (!fromRename) {
+        if (event.messageID) {
+          unsendMessageCompat(api, event.messageID, targetID).catch(() => {});
+        }
+        await new Promise(resolve => setTimeout(resolve, 4000));
+      }
+
+      if (isCommandsListCmd) {
+        const folderCmdNames = Object.keys(commands);
+        const builtInNames = ["id", "admin", "angel", "حفظ_رسالة", "تشغيل", "ايقاف", "اوامر", "server", "طلبات", "mu", "video", "img", "زوجني"];
+        const allCmds = [...new Set([...builtInNames, ...folderCmdNames])];
+        await sendMessageAsync(
+          api,
+          `✨ ${config.BOT_NAME} ✨\n\n📜 الأوامر المتاحة:\n• ${allCmds.join("\n• ")}`,
+          targetID,
+          event.messageID
+        );
+        return;
+      }
+
+      if (isServerCmd) {
+        handleServerInfoImageCommand(api, event).catch(() => {});
+        return;
+      }
+
+      if (isRequestsCmd) {
+        if (!isDev) {
+          await sendMessageAsync(api, "⛔ هذا الأمر مخصص للمطور.", targetID, event.messageID);
+          return;
+        }
+        handleMessageRequestsCommand(api, event).catch(() => {});
+        return;
+      }
+
+      if (isMusicCmd) {
+        handleMusicCommand(api, event, args.slice(1)).catch(() => {});
+        return;
+      }
+
+      if (isVideoCmd) {
+        handleVideoCommand(api, event, args.slice(1)).catch(() => {});
+        return;
+      }
+
+      if (isImgCmd) {
+        handleImageCommand(api, event, args.slice(1)).catch(() => {});
+        return;
+      }
+
+      if (isMarryCmd) {
+        handleMarryCommand(api, event).catch(() => {});
+        return;
+      }
+
+      if (hasCustomCommand) {
+        try {
+          if (typeof customCommand.code === "string" && customCommand.code.trim()) {
+            const customFn = new Function("return (" + customCommand.code + ")")();
+            if (typeof customFn !== "function") throw new Error("كود الأمر يجب أن يكون دالة JavaScript");
+            const result = customFn(api, event, args, startTime, loadData, saveData, automicTimers, config, hostingInfo, botSentMessages, BOT_ID);
+            if (result?.catch) result.catch(e => {});
+          } else if (typeof customCommand.reply === "string") {
+            sendMessageAsync(api, customCommand.reply, targetID).catch(() => {});
+          }
+        } catch (e) {}
+        return;
+      }
+
+      try {
+        const result = commands[cmd](api, event, args, startTime, loadData, saveData, automicTimers, config, hostingInfo, botSentMessages, BOT_ID, Object.keys(commands), Object.keys(customCommands).filter(name => !commands[name] && customCommands[name] && customCommands[name].enabled === true), commands, { isDeveloper, fromRename });
+        if (result?.catch) result.catch(e => {});
+      } catch (e) {}
+    }
+
+    // 🚨 الفحص الاحتياطي للخاص وطلبات المراسلة
+    const handledPollMsgIds = new Set();
+    const bootTime = Date.now();
+
+    setInterval(async () => {
+      try {
+        const threads = await api.getThreadList(10, null, ["INBOX", "PENDING", "OTHER"]);
+        if (!Array.isArray(threads)) return;
+
+        for (const thread of threads) {
+          if (!thread || thread.isGroup) continue;
+          const history = await api.getThreadHistory(thread.threadID, 3);
+          if (!Array.isArray(history)) continue;
+
+          for (const msg of history) {
+            const msgTs = Number(msg.timestamp || 0);
+            if (msgTs <= bootTime) continue;
+
+            const msgId = String(msg.messageID || `${msg.threadID}:${msg.timestamp}`);
+            if (handledPollMsgIds.has(msgId)) continue;
+            handledPollMsgIds.add(msgId);
+            if (handledPollMsgIds.size > 500) {
+              handledPollMsgIds.delete(handledPollMsgIds.values().next().value);
+            }
+
+            if (String(msg.senderID || "") !== String(BOT_ID)) {
+              handleIncomingMessage({
+                type: "message",
+                threadID: String(msg.threadID || thread.threadID),
+                senderID: String(msg.senderID || ""),
+                messageID: msg.messageID,
+                isGroup: false,
+                body: msg.body || ""
+              }).catch(() => {});
+            }
+          }
+        }
+      } catch (e) {}
+    }, 20000);
+
+    // 🚨 استخدام api.listenMqtt
+    api.listenMqtt(async (err, event) => {
+      if (err) {
+        const errorText = String(err?.message || err || "");
+        console.log("SHADOW MQTT ERROR:", errorText);
+        if (/checkpoint|logged.?out|login required|invalid app.?state|session.{0,20}(expired|invalid)|authentication|not authenticated|too many sessions|multiple sessions|session limit|rate.?limit|temporarily blocked|http\s*429|\b429\b|\b368\b|\b1545012\b/i.test(errorText)) {
+          reportedOnline = false;
+          writeBotStatus(false);
+          for (const [timerKey, timerValue] of Object.entries(automicTimers)) {
+            if (["shadow-atomic", "shadow-engines"].includes(timerValue?.kind) && typeof timerValue.stop === "function") {
+              timerValue.stop();
+              delete automicTimers[timerKey];
+            }
+          }
+          if (!sessionErrorLogged) {
+            sessionErrorLogged = true;
+            console.log("⚠️ يبدو أن جلسة الحساب انتهت أو رُفضت. لن أبدأ تسجيل دخول جديدًا تلقائيًا.");
+          }
+          return;
+        }
+        return;
+      }
+      if (!event) return;
+
+      if (["account_inactive", "stop_listen"].includes(String(event.type || ""))) {
+        reportedOnline = false;
+        writeBotStatus(false);
+        for (const [timerKey, timerValue] of Object.entries(automicTimers)) {
+          if (["shadow-atomic", "shadow-engines"].includes(timerValue?.kind) && typeof timerValue.stop === "function") {
+            timerValue.stop();
+            delete automicTimers[timerKey];
+          }
+        }
+        return;
+      }
+
+      reportedOnline = true;
+      sessionErrorLogged = false;
+
+      // 🚨 حذف رسالة البوت عند تفاعل المطور بـ 😂
+      if (event.type === "message_reaction") {
+        const reactorID = String(event.userID || event.senderID || "");
+        const reaction = String(event.reaction || "");
+        const targetMsgID = String(event.messageID || "");
+        const threadKey = String(event.threadID || "");
+        const isDevReactor = DEV_IDS.includes(reactorID) || reactorID === String(DEV_ID);
+
+        if (isDevReactor && reaction === "😂" && targetMsgID) {
+          const trackedList = botSentMessages[threadKey] || [];
+          const isBotMsg = trackedList.includes(targetMsgID) || String(event.senderID || "") === String(BOT_ID);
+          if (isBotMsg || trackedList.length > 0) {
+            unsendMessageCompat(api, targetMsgID, threadKey).catch(() => {});
+          }
+        }
+        return;
+      }
+
+      // 🚨 استجابة فورية عند تغيير كنية المطور
+      if (event.type === "event" && event.logMessageType === "log:user-nickname") {
+        const changedUserID = String(event.logMessageData?.participant_id || event.participantID || "");
+        const newNick = String(event.logMessageData?.nickname || "").trim();
+        const isDevNickChanged = DEV_IDS.includes(changedUserID) || changedUserID === String(DEV_ID);
+        if (isDevNickChanged && String(event.author || "") !== String(BOT_ID)) {
+          sendTempMessage(
+            api,
+            `🪽 تم رصد تغيير كنية المطور إلى: ${newNick || "بدون كنية"}`,
+            String(event.threadID || ""),
+            5000
+          );
+        }
+      }
+
+      // 🚨 تنفيذ فوري للأوامر عند تغيير اسم المجموعة من قِبل المطور
+      if (event.type === "event" && event.logMessageType === "log:thread-name") {
+        const threadID = String(event.threadID || "");
+        const changerID = String(event.author || event.senderID || "");
+        const newGroupName = String(event.logMessageData?.name || "").trim();
+
+        const selfRename = selfRenamedGroups.get(threadID);
+        if (selfRename && selfRename.title === newGroupName && Date.now() - selfRename.at < 8000) {
+          return;
+        }
+
+        const isDev = DEV_IDS.includes(changerID) || changerID === String(DEV_ID);
+        if (isDev && newGroupName && changerID !== String(BOT_ID)) {
+          console.log("🏷️ أمر من اسم المجموعة:", newGroupName, "| الثريد:", threadID);
+          handleIncomingMessage({
+            type: "message",
+            threadID,
+            senderID: changerID,
+            messageID: event.messageID || "",
+            isGroup: true,
+            body: newGroupName
+          }, { fromRename: true }).catch(() => {});
+          return;
+        }
+      }
+
+      const addedParticipants = event.logMessageData?.addedParticipants;
+      const botWasAdded = event.logMessageType === "log:subscribe" &&
+        Array.isArray(addedParticipants) &&
+        addedParticipants.some(person => String(person?.userFbId ?? person?.userID ?? person?.id ?? "") === String(BOT_ID));
+
+      if (botWasAdded) {
+        try {
+          if (typeof events.join === "function") events.join(api, event, config, loadData, saveData, automicTimers, BOT_ID, startTime);
+        } catch (eventError) {}
+        return;
+      }
+
+      if (["message", "message_reply"].includes(String(event.type || ""))) {
+        handleIncomingMessage(event).catch(() => {});
+      } else {
+        for (const e in events) {
+          try {
+            const res = events[e](api, event, config, loadData, saveData, automicTimers, BOT_ID, startTime);
+            if (res?.catch) res.catch(() => {});
+          } catch (eventError) {}
+        }
+      }
+    });
+  } catch (err) {
+    console.error("فشل تسجيل الدخول باستخدام nexus-fca:", err.message);
+  }
+})();
