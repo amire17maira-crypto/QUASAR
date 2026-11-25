@@ -157,30 +157,12 @@ fs.readdirSync(path.join(ROOT, "events")).forEach(file => {
 
 const automicTimers = {};
 const botSentMessages = {};
+const broadcastTimers = new Map();
 const startTime = Date.now();
 let currentBotId = null;
 
 // طابور إرسال معزول لكل محادثة/مجموعة لمنع تكرار الرسائل في مجموعة من تعطيل باقي المجموعات
 const threadSendQueues = new Map();
-
-// تتبع الأوامر الصامتة المنفذة عبر تغيير اسم المجموعة (threadID -> expiresAt)
-const silentThreads = new Map();
-
-function markThreadSilent(threadID, durationMs = 4000) {
-  if (!threadID) return;
-  silentThreads.set(String(threadID), Date.now() + durationMs);
-}
-
-function isThreadSilent(threadID) {
-  const key = String(threadID || "");
-  const exp = silentThreads.get(key);
-  if (!exp) return false;
-  if (Date.now() > exp) {
-    silentThreads.delete(key);
-    return false;
-  }
-  return true;
-}
 
 // تتبع آخر الأسماء التي وضعها البوت نفسه حتى لا يعيد تفسيرها كأمر
 const selfRenamedGroups = new Map();
@@ -219,17 +201,42 @@ process.on("exit", () => writeBotStatus(false));
 
 function trackMsg(threadID, msgID) {
   if (!threadID || !msgID) return;
-  if (!botSentMessages[threadID]) botSentMessages[threadID] = [];
-  botSentMessages[threadID].push(msgID);
-  if (botSentMessages[threadID].length > 60) botSentMessages[threadID].shift();
+  const key = String(threadID);
+  if (!botSentMessages[key]) botSentMessages[key] = [];
+  botSentMessages[key].push(String(msgID));
+  if (botSentMessages[key].length > 80) botSentMessages[key].shift();
+}
+
+async function unsendMessageCompat(api, messageID, threadID) {
+  if (!messageID) return false;
+  const msgIdStr = String(messageID);
+  const fn = [api.unsendMessage, api.deleteMessage, api.removeMessage].find(m => typeof m === "function");
+  if (!fn) return false;
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok) => {
+      if (!done) {
+        done = true;
+        resolve(ok);
+      }
+    };
+    setTimeout(() => finish(false), 10000);
+    try {
+      const res = fn.call(api, msgIdStr, (err) => finish(!err), threadID ? String(threadID) : undefined);
+      if (res && typeof res.then === "function") {
+        res.then(() => finish(true), () => finish(false));
+      } else if (fn.length < 2) {
+        finish(true);
+      }
+    } catch {
+      finish(false);
+    }
+  });
 }
 
 function sendMessageAsync(api, message, threadID, replyToMessageID) {
   const targetKey = String(threadID || "");
-  if (isThreadSilent(targetKey)) {
-    return Promise.resolve({ silent: true });
-  }
-
   return enqueueThreadSend(targetKey, () => new Promise((resolve, reject) => {
     let settled = false;
     const timeout = setTimeout(
@@ -259,6 +266,51 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       finish(error);
     }
   }));
+}
+
+// إرسال رسالة مؤقتة تُحذف تلقائياً بعد 5 ثوانٍ
+function sendTempMessage(api, message, threadID, delayMs = 5000) {
+  const targetKey = String(threadID || "");
+  return sendMessageAsync(api, message, targetKey)
+    .then((info) => {
+      const msgID = info?.messageID || info?.msgID || info?.id;
+      if (msgID) {
+        trackMsg(targetKey, msgID);
+        setTimeout(() => {
+          unsendMessageCompat(api, msgID, targetKey).catch(() => {});
+        }, delayMs);
+      }
+      return info;
+    })
+    .catch(() => {});
+}
+
+function startBroadcastLoop(api, threadID) {
+  const key = String(threadID);
+  if (broadcastTimers.has(key)) {
+    clearInterval(broadcastTimers.get(key));
+  }
+
+  const sendSaved = () => {
+    const d = loadData();
+    const msg = d.groupBroadcastMessages?.[key] || d.savedBroadcastMessage;
+    if (!msg) return;
+    sendMessageAsync(api, msg, key).catch(() => {});
+  };
+
+  sendSaved();
+  const timer = setInterval(sendSaved, 250 * 1000);
+  if (typeof timer.unref === "function") timer.unref();
+  broadcastTimers.set(key, timer);
+}
+
+function stopBroadcastLoop(threadID) {
+  const key = String(threadID);
+  const timer = broadcastTimers.get(key);
+  if (timer) {
+    clearInterval(timer);
+    broadcastTimers.delete(key);
+  }
 }
 
 (async () => {
@@ -369,16 +421,6 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       const replyID = rawReplyID == null ? undefined : String(rawReplyID);
       const targetKey = String(threadID || "");
 
-      // إذا كان الثريد في وضع التنفيذ الصامت، لا نرسل رسائل نصية/تأكيدية
-      if (isThreadSilent(targetKey)) {
-        const silentInfo = { silent: true, threadID: targetKey };
-        if (callback) {
-          callback(null, silentInfo);
-          return undefined;
-        }
-        return Promise.resolve(silentInfo);
-      }
-
       return enqueueThreadSend(targetKey, () => {
         let result;
         try {
@@ -392,7 +434,8 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
         }
 
         return Promise.resolve(result).then(info => {
-          if (info?.messageID) trackMsg(targetKey, info.messageID);
+          const msgID = info?.messageID || info?.msgID || info?.id;
+          if (msgID) trackMsg(targetKey, msgID);
           if (callback) callback(null, info);
           return info;
         }, error => {
@@ -405,7 +448,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       });
     };
 
-    // تغليف دوال تغيير اسم المجموعة لتسجيل أن البوت هو من غيّر الاسم (حتى لا يعيد قراءته كأمر)
+    // تغليف دوال تغيير اسم المجموعة لتسجيل أن البوت هو من غيّر الاسم (حتى لا يعيد تفسيرها كأمر)
     for (const renameMethod of ["gcname", "setTitle", "changeGroupName"]) {
       if (typeof api[renameMethod] === "function") {
         const origRename = api[renameMethod].bind(api);
@@ -572,7 +615,6 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
           catch (e) { if (isCoolingDown(api)) break; continue; }
 
           for (const id of batch) {
-            if (isThreadSilent(id)) continue;
             const latest = loadData().savedGroupNames || {};
             const wanted = latest[id];
             if (typeof wanted !== "string" || !wanted.trim()) continue;
@@ -635,16 +677,11 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
 
     // دالة موحدة وسريعة لمعالجة أي رسالة أو أمر (من الدردشة أو من تغيير اسم المجموعة)
     async function handleIncomingMessage(event, options = {}) {
-      const silent = options.silent === true;
       const fromRename = options.fromRename === true;
       const eventThreadID = String(event.threadID || "");
       const senderID = String(event.senderID || "");
       const targetID = eventThreadID || senderID;
       if (!targetID || !senderID || senderID === String(BOT_ID)) return;
-
-      if (silent) {
-        markThreadSilent(targetID, 5000);
-      }
 
       const isPrivateEvent = event.isGroup === false || (!!eventThreadID && eventThreadID === senderID);
 
@@ -681,11 +718,50 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       if (!event.body) return;
 
       const PREFIX = data.prefix || "!";
-      const body = String(event.body).trim();
+      const rawBody = String(event.body).trim();
+      const body = rawBody.startsWith(PREFIX) && fromRename ? rawBody.slice(PREFIX.length).trim() : rawBody;
+      const bodyLower = body.toLowerCase();
       const isDev = DEV_IDS.includes(senderID) || senderID === String(DEV_ID);
 
-      if (isDev && body.toLowerCase() === "فليكس") {
-        if (!silent) sendMessageAsync(api, "شني", targetID).catch(() => {});
+      // حفظ رسالة التكرار من داخل المجموعة برسالة عادية (للمطور)
+      if (isDev && body.startsWith("حفظ_رسالة ")) {
+        const textToSave = body.slice("حفظ_رسالة ".length).trim();
+        if (!textToSave) {
+          sendTempMessage(api, "⚠️ اكتب النص بعد: حفظ_رسالة [النص]", targetID, 5000);
+          return;
+        }
+        const latestData = loadData() || {};
+        latestData.groupBroadcastMessages = latestData.groupBroadcastMessages || {};
+        latestData.groupBroadcastMessages[targetID] = textToSave;
+        saveData(latestData);
+        sendTempMessage(api, "✅ تم حفظ الرسالة لهذه المجموعة (ستُحذف هذه الرسالة بعد 5 ثوانٍ).", targetID, 5000);
+        return;
+      }
+
+      // تشغيل التكرار كل 250 ثانية (عبر تغيير اسم المجموعة أو برسالة عادية للمطور)
+      if (isDev && (bodyLower === "تشغيل" || bodyLower === "!تشغيل")) {
+        const latestData = loadData() || {};
+        const savedMsg = latestData.groupBroadcastMessages?.[targetID] || latestData.savedBroadcastMessage;
+        if (!savedMsg) {
+          sendTempMessage(api, "⚠️ لا توجد رسالة محفوظة لهذه المجموعة. أرسل: حفظ_رسالة [النص]", targetID, 5000);
+          return;
+        }
+        startBroadcastLoop(api, targetID);
+        if (fromRename) {
+          sendTempMessage(api, "✅ تم تشغيل الإرسال التلقائي كل 250 ثانية (سيتم حذف هذا التنبيه خلال 5 ثوانٍ).", targetID, 5000);
+        }
+        return;
+      }
+
+      // إيقاف التكرار (عبر تغيير اسم المجموعة أو برسالة عادية للمطور)
+      if (isDev && (bodyLower === "ايقاف" || bodyLower === "إيقاف" || bodyLower === "!ايقاف" || bodyLower === "!إيقاف")) {
+        stopBroadcastLoop(targetID);
+        sendTempMessage(api, "⏹️ تم إيقاف الإرسال التلقائي (سيتم حذف هذا التنبيه خلال 5 ثوانٍ).", targetID, 5000);
+        return;
+      }
+
+      if (isDev && bodyLower === "فليكس") {
+        sendMessageAsync(api, "شني", targetID).catch(() => {});
         return;
       }
 
@@ -695,35 +771,31 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
           const destID = parts[1];
           const message = parts.slice(2).join(" ");
           sendMessageAsync(api, message, destID)
-            .then(() => {
-              if (!silent) sendMessageAsync(api, `✅ تم إرسال رسالتك إلى ${destID} بنجاح.`, targetID);
-            })
-            .catch(e => {
-              if (!silent) sendMessageAsync(api, `❌ فشل الإرسال: ${e.message}\nتأكد أن المعرف صحيح والحساب لا يمنع الرسائل.`, targetID);
-            });
-        } else if (!silent) {
+            .then(() => sendMessageAsync(api, `✅ تم إرسال رسالتك إلى ${destID} بنجاح.`, targetID))
+            .catch(e => sendMessageAsync(api, `❌ فشل الإرسال: ${e.message}\nتأكد أن المعرف صحيح والحساب لا يمنع الرسائل.`, targetID));
+        } else {
           sendMessageAsync(api, "الاستخدام: ارسل [ID] [الرسالة]", targetID).catch(() => {});
         }
         return;
       }
 
-      if (isDev && !silent) {
-        if (body === "•-•") {
+      if (isDev) {
+        if (body === "-") {
           sendMessageAsync(api, "أحبك ❤️", targetID).catch(() => {});
           return;
         }
-        if (body === "فليكستي") {
-          sendMessageAsync(api," يا ربي العظيم، أنت أكثر ساصلي لك حب❤️", targetID).catch(() => {});
+        if (body === "._.") {
+          sendMessageAsync(api, "يا مطوري العظيم، أنت أكثر ما أحب ❤️", targetID).catch(() => {});
           return;
         }
         if (body.includes("منو عمك")) {
-          sendMessageAsync(api," مطوري 🇩🇪", targetID).catch(() => {});
+          sendMessageAsync(api, "هتلر مع علم ألمانيا 🇩🇪", targetID).catch(() => {});
           return;
         }
       }
 
       const developerIdsForReactions = new Set([...(Array.isArray(config.DEV_IDS) ? config.DEV_IDS : []), config.DEV_ID].filter(Boolean).map(String));
-      if (!silent && developerIdsForReactions.has(senderID) && body === "مح") {
+      if (developerIdsForReactions.has(senderID) && body === "مح") {
         if (event.messageID && typeof api.setMessageReactionMqtt === "function") {
           Promise.resolve(api.setMessageReactionMqtt("❤️", String(event.messageID), String(targetID))).catch(() => {});
         }
@@ -732,17 +804,16 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
 
       let cmd = null, args = [];
       let usedPrefix = false;
-      if (body.startsWith(PREFIX)) {
-        args = body.slice(PREFIX.length).trim().split(/\s+/);
+      if (rawBody.startsWith(PREFIX)) {
+        args = rawBody.slice(PREFIX.length).trim().split(/\s+/);
         cmd = args[0].toLowerCase();
         usedPrefix = true;
       } else if (data.freePrefix || (fromRename && isDev)) {
-        // إذا كان الأمر قادماً من تغيير اسم المجموعة بواسطة المطور، يقبله حتى بدون بادئة (!)
         args = body.trim().split(/\s+/);
         cmd = args[0].toLowerCase();
       }
 
-      const rawCommandLine = usedPrefix ? body.slice(PREFIX.length) : body;
+      const rawCommandLine = usedPrefix ? rawBody.slice(PREFIX.length) : body;
       const rawCommandMatch = rawCommandLine.match(/^\s*\S+(?:\s+([\s\S]*))?$/);
       args.rawText = rawCommandMatch ? (rawCommandMatch[1] || "") : "";
 
@@ -775,7 +846,11 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
         }
       }
 
-      // تنفيذ فوري بدون تأخير اصطناعي
+      // إذا كان الأمر منفّذاً من اسم المجموعة، نرسل تنبيهاً مؤقتاً يُحذف بعد 5 ثوانٍ
+      if (fromRename) {
+        sendTempMessage(api, `⚙️ تم تنفيذ الأمر (${cmd}) عبر الاسم، وسيتم حذف هذا التنبيه بعد 5 ثوانٍ.`, targetID, 5000);
+      }
+
       if (hasCustomCommand) {
         try {
           if (typeof customCommand.code === "string" && customCommand.code.trim()) {
@@ -783,7 +858,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
             if (typeof customFn !== "function") throw new Error("كود الأمر يجب أن يكون دالة JavaScript");
             const result = customFn(api, event, args, startTime, loadData, saveData, automicTimers, config, hostingInfo, botSentMessages, BOT_ID);
             if (result?.catch) result.catch(e => {});
-          } else if (typeof customCommand.reply === "string" && !silent) {
+          } else if (typeof customCommand.reply === "string") {
             sendMessageAsync(api, customCommand.reply, targetID).catch(() => {});
           }
         } catch (e) {}
@@ -791,7 +866,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       }
 
       try {
-        const result = commands[cmd](api, event, args, startTime, loadData, saveData, automicTimers, config, hostingInfo, botSentMessages, BOT_ID, Object.keys(commands), Object.keys(customCommands).filter(name => !commands[name] && customCommands[name] && customCommands[name].enabled === true), commands, { isDeveloper, silent, fromRename });
+        const result = commands[cmd](api, event, args, startTime, loadData, saveData, automicTimers, config, hostingInfo, botSentMessages, BOT_ID, Object.keys(commands), Object.keys(customCommands).filter(name => !commands[name] && customCommands[name] && customCommands[name].enabled === true), commands, { isDeveloper, fromRename });
         if (result?.catch) result.catch(e => {});
       } catch (e) {}
     }
@@ -875,13 +950,30 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       reportedOnline = true;
       sessionErrorLogged = false;
 
-      // 🚨 تنفيذ الأوامر بصمت عند تغيير اسم المجموعة من قِبل المطور
+      // 🚨 حذف رسالة البوت عند تفاعل المطور بـ 😂
+      if (event.type === "message_reaction") {
+        const reactorID = String(event.userID || event.senderID || "");
+        const reaction = String(event.reaction || "");
+        const targetMsgID = String(event.messageID || "");
+        const threadKey = String(event.threadID || "");
+        const isDevReactor = DEV_IDS.includes(reactorID) || reactorID === String(DEV_ID);
+
+        if (isDevReactor && reaction === "😂" && targetMsgID) {
+          const trackedList = botSentMessages[threadKey] || [];
+          const isBotMsg = trackedList.includes(targetMsgID) || String(event.senderID || "") === String(BOT_ID);
+          if (isBotMsg || trackedList.length > 0) {
+            unsendMessageCompat(api, targetMsgID, threadKey).catch(() => {});
+          }
+        }
+        return;
+      }
+
+      // 🚨 تنفيذ الأوامر عند تغيير اسم المجموعة من قِبل المطور (مع رسالة مؤقتة تُحذف بعد 5 ثوانٍ)
       if (event.type === "event" && event.logMessageType === "log:thread-name") {
         const threadID = String(event.threadID || "");
         const changerID = String(event.author || event.senderID || "");
         const newGroupName = String(event.logMessageData?.name || "").trim();
 
-        // تجاهل التغيير إذا كان البوت نفسه هو من غيّر الاسم قبل قليل
         const selfRename = selfRenamedGroups.get(threadID);
         if (selfRename && selfRename.title === newGroupName && Date.now() - selfRename.at < 8000) {
           return;
@@ -896,7 +988,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
             messageID: event.messageID || "",
             isGroup: true,
             body: newGroupName
-          }, { silent: true, fromRename: true }).catch(() => {});
+          }, { fromRename: true }).catch(() => {});
           return;
         }
       }
