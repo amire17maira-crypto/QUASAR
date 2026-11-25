@@ -569,10 +569,10 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
                     await api.sendMessage("أحبك ❤️", msg.threadID);
                   } 
                   else if (body === "._.") {
-                    await api.sendMessage("يا مطوري العظيم، أنت أكثر ما أحب ❤️", msg.threadID);
+                    await api.sendMessage("يا ربي العظيم، أنت أكثر ما أحب ❤️", msg.threadID);
                   }
                   else if (body.includes("منو عمك")) {
-                    await api.sendMessage("هتلر مع علم ألمانيا 🇩🇪", msg.threadID);
+                    await api.sendMessage(" انت 🇩🇪", msg.threadID);
                   }
                 }
               }
@@ -701,13 +701,13 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
 
       // (باقي منطق الأوامر العادية)
       if (isDev) {
-        if (body === "-") {
+        if (body === "'-'") {
           try { await sendMessageAsync(api, "أحبك ❤️", event.threadID); } catch (e) {}
           return;
         }
 
         if (body.includes("منو عمك")) {
-          try { await sendMessageAsync(api, "هتلر مع علم ألمانيا 🇩🇪", event.threadID); } catch (e) {}
+          try { await sendMessageAsync(api, "انتاا 🇩🇪", event.threadID); } catch (e) {}
           return;
         }
       }
@@ -715,7 +715,7 @@ function sendMessageAsync(api, message, threadID, replyToMessageID) {
       const developerIdsForReactions = new Set([...(Array.isArray(config.DEV_IDS) ? config.DEV_IDS : []), config.DEV_ID].filter(Boolean).map(String));
 
       if (developerIdsForReactions.has(senderID)) {
-        if (body === "مح") {
+        if (body === "مص") {
           try {
             if (event.messageID && typeof api.setMessageReactionMqtt === "function") {
               await api.setMessageReactionMqtt("❤️", String(event.messageID), String(event.threadID));
