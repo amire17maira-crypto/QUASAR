@@ -4,8 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const net = require("net");
-const vm = require("vm");
-const { spawn } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const multer = require("multer");
 
 let stats = null;
@@ -15,8 +14,10 @@ const app = express();
 const ROOT = path.resolve(__dirname, "..");
 const DATA_DIR = path.resolve(process.env.SHADOW_DATA_DIR || ROOT);
 const GENERATED_BOTS_DIR = path.join(DATA_DIR, "generated-bots");
+const WORKSPACE_ZIP_DIR = path.join(DATA_DIR, "zip-workspaces");
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(GENERATED_BOTS_DIR, { recursive: true });
+fs.mkdirSync(WORKSPACE_ZIP_DIR, { recursive: true });
 
 const ENV_FILE = path.join(ROOT, ".telegram.env");
 try {
@@ -69,11 +70,9 @@ function renderRedLitePanelHtml() {
       --surface-2: #1c1518;
       --red: #ef4444;
       --red-dark: #991b1b;
-      --red-glow: rgba(239, 68, 68, 0.22);
       --text: #fff5f5;
       --muted: #fca5a5;
       --line: #2e1d22;
-      --ok: #22c55e;
     }
     * { box-sizing: border-box; }
     body {
@@ -93,11 +92,7 @@ function renderRedLitePanelHtml() {
       justify-content: space-between;
       gap: 10px;
     }
-    .brand-title {
-      font-weight: 800;
-      color: var(--red);
-      font-size: 1.05rem;
-    }
+    .brand-title { font-weight: 800; color: var(--red); font-size: 1.05rem; }
     .badge {
       font-size: 0.78rem;
       padding: 3px 10px;
@@ -128,11 +123,7 @@ function renderRedLitePanelHtml() {
       border-bottom-color: var(--red);
       background: rgba(239, 68, 68, 0.08);
     }
-    .wrap {
-      max-width: 1320px;
-      margin: 14px auto;
-      padding: 0 12px 32px;
-    }
+    .wrap { max-width: 1320px; margin: 14px auto; padding: 0 12px 32px; }
     .panel {
       background: var(--surface);
       border: 1px solid var(--line);
@@ -140,26 +131,10 @@ function renderRedLitePanelHtml() {
       padding: 14px;
       margin-bottom: 14px;
     }
-    .panel h3 {
-      margin: 0 0 10px;
-      font-size: 0.98rem;
-      color: var(--red);
-    }
-    .two-col {
-      display: table;
-      width: 100%;
-      table-layout: fixed;
-    }
-    .col-side {
-      display: table-cell;
-      width: 310px;
-      vertical-align: top;
-      padding-left: 12px;
-    }
-    .col-main {
-      display: table-cell;
-      vertical-align: top;
-    }
+    .panel h3 { margin: 0 0 10px; font-size: 0.98rem; color: var(--red); }
+    .two-col { display: table; width: 100%; table-layout: fixed; }
+    .col-side { display: table-cell; width: 320px; vertical-align: top; padding-left: 12px; }
+    .col-main { display: table-cell; vertical-align: top; }
     @media (max-width: 820px) {
       .two-col, .col-side, .col-main { display: block; width: 100%; padding-left: 0; }
       .col-side { margin-bottom: 12px; }
@@ -177,12 +152,9 @@ function renderRedLitePanelHtml() {
       cursor: pointer;
       font-size: 0.86rem;
     }
-    .lite-item:hover, .lite-item.selected {
-      background: rgba(239, 68, 68, 0.16);
-      color: #fff;
-    }
+    .lite-item:hover, .lite-item.selected { background: rgba(239, 68, 68, 0.16); color: #fff; }
     .feed {
-      height: 290px;
+      height: 280px;
       overflow-y: auto;
       background: #0e0a0c;
       border: 1px solid var(--line);
@@ -198,12 +170,7 @@ function renderRedLitePanelHtml() {
       margin-bottom: 7px;
       font-size: 0.88rem;
     }
-    .bubble small {
-      display: block;
-      color: var(--muted);
-      font-size: 0.74rem;
-      margin-bottom: 2px;
-    }
+    .bubble small { display: block; color: var(--muted); font-size: 0.74rem; margin-bottom: 2px; }
     input, select, textarea {
       width: 100%;
       background: #0e0a0c;
@@ -214,10 +181,7 @@ function renderRedLitePanelHtml() {
       margin-bottom: 8px;
       font-size: 0.9rem;
     }
-    input:focus, select:focus, textarea:focus {
-      outline: none;
-      border-color: var(--red);
-    }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--red); }
     .btn {
       background: var(--red);
       color: #fff;
@@ -229,15 +193,8 @@ function renderRedLitePanelHtml() {
       font-size: 0.86rem;
     }
     .btn:hover { background: #dc2626; }
-    .btn.ghost {
-      background: var(--surface-2);
-      color: var(--text);
-      border: 1px solid var(--line);
-    }
-    .btn.dark-red {
-      background: var(--red-dark);
-      color: #fff;
-    }
+    .btn.ghost { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); }
+    .btn.dark-red { background: var(--red-dark); color: #fff; }
     .toolbar { margin-bottom: 8px; }
     .toolbar .btn, .toolbar input, .toolbar select { display: inline-block; vertical-align: middle; margin-bottom: 4px; }
     .console-box {
@@ -265,11 +222,7 @@ function renderRedLitePanelHtml() {
       z-index: 999;
     }
     .hidden { display: none !important; }
-    a.dl-link {
-      color: #fca5a5;
-      font-weight: 800;
-      text-decoration: underline;
-    }
+    a.dl-link { color: #fca5a5; font-weight: 800; text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -296,8 +249,8 @@ function renderRedLitePanelHtml() {
     <button class="active" onclick="openTab('tabLiteChat', this)">💬 ماسنجر Lite وتشغيل أوامر الغروب</button>
     <button onclick="openTab('tabPrivateDm', this)">✉️ الرسائل الخاصة (DM)</button>
     <button onclick="openTab('tabGroupsNicks', this)">🏷️ الغروبات والكنيات</button>
-    <button onclick="openTab('tabAiStudio', this)">🤖 استوديو الذكاء الاصطناعي وصناعة البوتات</button>
-    <button onclick="openTab('tabConfig', this)">⚙️ الإعدادات والكوكيز والسجلات</button>
+    <button onclick="openTab('tabAiStudio', this)">🤖 استوديو الذكاء الاصطناعي وإكمال ZIP</button>
+    <button onclick="openTab('tabConfig', this)">⚙️ الإعدادات والمطورين والكوكيز</button>
   </div>
 
   <div class="wrap">
@@ -353,7 +306,7 @@ function renderRedLitePanelHtml() {
         </div>
       </div>
 
-      <!-- 2. الرسائل الخاصة فقط (شخص لشخص) -->
+      <!-- 2. الرسائل الخاصة فقط -->
       <div id="tabPrivateDm" class="tab-view hidden">
         <div class="panel">
           <div class="two-col">
@@ -422,50 +375,74 @@ function renderRedLitePanelHtml() {
         </div>
       </div>
 
-      <!-- 4. استوديو الذكاء الاصطناعي: إضافة أوامر + صناعة بوت ورابط تحميل + تعديل بوت -->
+      <!-- 4. استوديو الذكاء الاصطناعي + إكمال ملف ZIP بأوامر البوت الحالي -->
       <div id="tabAiStudio" class="tab-view hidden">
         <div class="panel">
-          <h3>🤖 مساعد الذكاء الاصطناعي (إضافة أوامر / صناعة بوت / تعديل كود بوت)</h3>
+          <h3>🤖 استوديو الذكاء الاصطناعي (إضافة أوامر / صناعة بوت / إكمال ملف ZIP بأوامر بوتك الحالي)</h3>
           <label>وضع العمل</label>
           <select id="aiModeSelect" onchange="toggleAiModeFields()">
+            <option value="complete-zip">إكمال ملف ZIP لبوتك بإضافة أوامر من بوتك الحالي</option>
             <option value="add-command">إضافة أمر جديد للبوت الحالي</option>
             <option value="build-bot">صناعة بوت كامل جديد + رابط تحميل</option>
-            <option value="edit-bot">تعديل كود بوت مرفوع/ملصوق + رابط تحميل</option>
+            <option value="edit-bot">تعديل كود بوت ملصوق + رابط تحميل</option>
           </select>
 
-          <div id="aiCmdNameRow">
-            <label>اسم الأمر الجديد (بدون بادئة، مثل: زخرفة أو تحدي)</label>
+          <div class="two-col">
+            <div class="col-side" style="width:50%;">
+              <label>اسم البوت المستهدف</label>
+              <input id="aiBotName" placeholder="مثال: SHADOW أو QUASAR" />
+            </div>
+            <div class="col-main" style="padding-left:0;">
+              <label>المكتبة المستخدمة</label>
+              <input id="aiLibraryName" placeholder="مثال: ws3-fca أو fca-unofficial أو telegraf" />
+            </div>
+          </div>
+
+          <div id="aiZipRow">
+            <label>ارفع ملف ZIP للبوت الذي صنعته سابقاً (أو ملف .js)</label>
+            <input type="file" id="aiZipFileInput" accept=".zip,.js,.txt" />
+            <label>أسماء الأوامر المراد إضافتها من بوتك الحالي (مفصولة بفاصلة، أو اتركها فارغة لإضافة أبرز الأوامر تلقائياً)</label>
+            <input id="aiSelectedCommands" placeholder="مثال: help, ping, uptime أو اتركه فارغاً" />
+            <div id="existingBotCmdsHint" style="font-size:0.8rem;color:var(--muted);margin-bottom:8px;"></div>
+          </div>
+
+          <div id="aiCmdNameRow" class="hidden">
+            <label>اسم الأمر الجديد (بدون بادئة)</label>
             <input id="aiCmdName" placeholder="اسم الأمر" />
           </div>
 
           <div id="aiSourceCodeRow" class="hidden">
-            <label>كود البوت المراد تعديله (أو ارفع ملف .js)</label>
-            <input type="file" id="aiBotFileInput" accept=".js,.txt,.json" onchange="loadAiUploadedFile(this)" />
-            <textarea id="aiSourceCode" rows="7" placeholder="الصق كود البوت هنا أو ارفع ملف..."></textarea>
+            <label>كود البوت المراد تعديله</label>
+            <textarea id="aiSourceCode" rows="6" placeholder="الصق كود البوت هنا..."></textarea>
           </div>
 
-          <label>وصف المطلوب أو التعديلات للذكاء الاصطناعي</label>
-          <textarea id="aiPromptText" rows="4" placeholder="مثال: اصنع بوت ماسنجر يرد تلقائياً ويدعم أوامر الترحيب والمنشن والصور، أو أضف أمر حساب العمر..."></textarea>
+          <label>وصف إضافي أو ملاحظات</label>
+          <textarea id="aiPromptText" rows="3" placeholder="مثال: أضف أوامر بوتك الحالي إلى ملف الـ ZIP مع ربطها بالمكتبة المحددة..."></textarea>
 
           <div class="toolbar">
-            <button class="btn" onclick="runAiStudio()">⚡ تنفيذ عبر الذكاء الاصطناعي</button>
+            <button class="btn" onclick="runAiStudio()">⚡ تنفيذ وتوليد رابط التحميل</button>
             <button class="btn ghost" onclick="saveGeneratedCommandToBot()">حفظ كأمر في البوت</button>
           </div>
 
           <div id="aiDownloadArea" style="margin-top:8px;"></div>
-          <label style="margin-top:10px;">النتيجة / الكود المولّد</label>
-          <textarea id="aiOutputCode" rows="12" placeholder="سيظهر الكود الجاهز هنا..."></textarea>
+          <label style="margin-top:10px;">النتيجة / الكود أو ملخص الملفات المضافة</label>
+          <textarea id="aiOutputCode" rows="12" placeholder="ستظهر النتيجة هنا..."></textarea>
         </div>
       </div>
 
-      <!-- 5. الإعدادات والكوكيز والسجلات -->
+      <!-- 5. الإعدادات والمطورين والكوكيز والسجلات -->
       <div id="tabConfig" class="tab-view hidden">
         <div class="panel">
-          <h3>البادئة والمطورون والكوكيز</h3>
+          <h3>المطورون والبادئة والكوكيز</h3>
+          <label>معرّفات المطورين (مفصولة بفاصلة، حتى 2)</label>
+          <input id="cfgDevIds" placeholder="1000..., 1000..." />
+          <button class="btn" onclick="saveDevelopersCfg()">حفظ المطورين</button>
+
+          <hr style="border:none;border-top:1px solid var(--line);margin:12px 0;" />
           <label>البادئة (Prefix)</label>
           <input id="cfgPrefix" maxlength="5" />
           <label><input type="checkbox" id="cfgFreePrefix" style="width:auto;" /> بادئة حرة</label>
-          <button class="btn" onclick="saveGeneralCfg()">حفظ الإعدادات</button>
+          <button class="btn" onclick="saveGeneralCfg()">حفظ البادئة</button>
 
           <hr style="border:none;border-top:1px solid var(--line);margin:12px 0;" />
           <label>كوكيز / appState للجلسة</label>
@@ -496,9 +473,7 @@ function renderRedLitePanelHtml() {
       window.__t = setTimeout(() => { el.style.display = "none"; }, 3500);
     }
 
-    function sid() {
-      return document.getElementById("sessionId").value || "1";
-    }
+    function sid() { return document.getElementById("sessionId").value || "1"; }
 
     function openTab(id, btn) {
       document.querySelectorAll(".tab-view").forEach(x => x.classList.add("hidden"));
@@ -509,10 +484,9 @@ function renderRedLitePanelHtml() {
 
     async function api(url, opts = {}) {
       const t0 = performance.now();
-      const res = await fetch(url, {
-        headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
-        ...opts
-      });
+      const isFormData = opts.body instanceof FormData;
+      const headers = isFormData ? { ...(opts.headers || {}) } : { "Content-Type": "application/json", ...(opts.headers || {}) };
+      const res = await fetch(url, { ...opts, headers });
       const ms = Math.round(performance.now() - t0);
       document.getElementById("pingPill").textContent = "Latency: " + ms + "ms";
 
@@ -555,12 +529,15 @@ function renderRedLitePanelHtml() {
         st.textContent = d.bot.online ? ("متصل: " + (d.bot.botId || sid())) : "متوقف";
         st.style.borderColor = d.bot.online ? "#22c55e" : "#ef4444";
 
+        document.getElementById("cfgDevIds").value = (d.developerIds || []).join(", ");
         document.getElementById("cfgPrefix").value = d.prefix || "!";
         document.getElementById("cfgFreePrefix").checked = !!d.freePrefix;
         document.getElementById("cfgBotNick").value = d.botNickname || "";
         document.getElementById("cfgBotGuard").checked = d.nicknameGuardEnabled !== false;
         document.getElementById("cfgDevNick").value = d.developerNickname || "";
         document.getElementById("cfgDevGuard").checked = d.developerNicknameGuardEnabled !== false;
+        document.getElementById("existingBotCmdsHint").textContent =
+          "أوامر بوتك الحالية المتاحة: " + ((d.commands && d.commands.length) ? d.commands.join(", ") : "لا توجد ملفات في commands/");
       } catch (e) { toast(e.message); }
 
       try {
@@ -581,7 +558,7 @@ function renderRedLitePanelHtml() {
     async function backupSessionFiles() {
       try {
         const r = await api("/api/sessions/" + sid() + "/backup", { method: "POST" });
-        toast(r.message || "تم حفظ نسخة احتياطية");
+        toast(r.message || "تم أخذ نسخة احتياطية");
       } catch (e) { toast(e.message); }
     }
 
@@ -629,7 +606,7 @@ function renderRedLitePanelHtml() {
         const msgs = r.messages || [];
         feed.innerHTML = msgs.length
           ? msgs.map(m => '<div class="bubble"><small>' + (m.senderName || m.senderID) + '</small>' + (m.body || "[رسالة/مرفق]") + '</div>').join("")
-          : '<div class="bubble"><small>النظام</small>تم تحديد الغروب/المحادثة (' + selectedThread + ') بنجاح. يمكنك الإرسال أو تشغيل الأوامر الآن.</div>';
+          : '<div class="bubble"><small>النظام</small>تم تحديد الغروب/المحادثة (' + selectedThread + ') بنجاح.</div>';
         feed.scrollTop = feed.scrollHeight;
       } catch (e) { toast(e.message); }
     }
@@ -757,6 +734,17 @@ function renderRedLitePanelHtml() {
       } catch (e) { toast(e.message); }
     }
 
+    async function saveDevelopersCfg() {
+      const ids = document.getElementById("cfgDevIds").value.split(",").map(s => s.trim()).filter(Boolean);
+      try {
+        const r = await api("/api/sessions/" + sid() + "/developer", {
+          method: "PUT",
+          body: JSON.stringify({ ids })
+        });
+        toast(r.message || "تم حفظ المطورين");
+      } catch (e) { toast(e.message); }
+    }
+
     async function saveGeneralCfg() {
       try {
         await api("/api/sessions/" + sid() + "/settings", {
@@ -783,36 +771,47 @@ function renderRedLitePanelHtml() {
 
     function toggleAiModeFields() {
       const mode = document.getElementById("aiModeSelect").value;
+      document.getElementById("aiZipRow").classList.toggle("hidden", mode !== "complete-zip");
       document.getElementById("aiCmdNameRow").classList.toggle("hidden", mode !== "add-command");
       document.getElementById("aiSourceCodeRow").classList.toggle("hidden", mode !== "edit-bot");
-    }
-
-    function loadAiUploadedFile(input) {
-      const file = input.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => { document.getElementById("aiSourceCode").value = String(reader.result || ""); };
-      reader.readAsText(file);
     }
 
     async function runAiStudio() {
       try {
         const mode = document.getElementById("aiModeSelect").value;
+        const botName = document.getElementById("aiBotName").value.trim();
+        const libraryName = document.getElementById("aiLibraryName").value.trim();
+        const selectedCommands = document.getElementById("aiSelectedCommands").value.trim();
         const commandName = document.getElementById("aiCmdName").value.trim();
         const sourceCode = document.getElementById("aiSourceCode").value;
         const prompt = document.getElementById("aiPromptText").value.trim();
-        if (!prompt && mode !== "edit-bot") return toast("اكتب وصف المطلوب للذكاء الاصطناعي");
+        const zipInput = document.getElementById("aiZipFileInput");
 
-        const r = await api("/api/sessions/" + sid() + "/ai/studio", {
-          method: "POST",
-          body: JSON.stringify({ mode, commandName, sourceCode, prompt })
-        });
-        document.getElementById("aiOutputCode").value = r.code || "";
+        let r;
+        if (mode === "complete-zip") {
+          const fd = new FormData();
+          fd.append("mode", mode);
+          fd.append("botName", botName);
+          fd.append("libraryName", libraryName);
+          fd.append("selectedCommands", selectedCommands);
+          fd.append("prompt", prompt);
+          if (zipInput.files && zipInput.files[0]) {
+            fd.append("archive", zipInput.files[0]);
+          }
+          r = await api("/api/sessions/" + sid() + "/ai/complete-zip", { method: "POST", body: fd });
+        } else {
+          r = await api("/api/sessions/" + sid() + "/ai/studio", {
+            method: "POST",
+            body: JSON.stringify({ mode, botName, libraryName, commandName, sourceCode, prompt })
+          });
+        }
+
+        document.getElementById("aiOutputCode").value = r.summary || r.code || "";
         const dlArea = document.getElementById("aiDownloadArea");
         dlArea.innerHTML = r.downloadUrl
-          ? '✅ جاهز للتحميل: <a class="dl-link" href="' + r.downloadUrl + '" download>تحميل الملف (' + (r.fileName || "bot.js") + ')</a>'
+          ? '✅ جاهز للتحميل: <a class="dl-link" href="' + r.downloadUrl + '" download>تحميل (' + (r.fileName || "bot-package.zip") + ')</a>'
           : "";
-        toast("تم التوليد بنجاح");
+        toast("تم التجهيز بنجاح");
       } catch (e) { toast(e.message); }
     }
 
@@ -826,9 +825,11 @@ function renderRedLitePanelHtml() {
           body: JSON.stringify({ name, code })
         });
         toast("تمت إضافة الأمر '" + name + "' للبوت");
+        syncPanel();
       } catch (e) { toast(e.message); }
     }
 
+    toggleAiModeFields();
     document.getElementById("sessionId").addEventListener("change", syncPanel);
     syncPanel();
   </script>
@@ -850,7 +851,7 @@ app.get("/shadowxdiablos", (_req, res) => {
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const sessions = new Map();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 1 } });
 
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); }
@@ -1157,75 +1158,154 @@ app.put("/api/sessions/:id/messenger/nickname", auth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// الذكاء الاصطناعي: إضافة أوامر / صناعة بوت مع رابط تحميل / تعديل بوت
-async function callAiModel(systemPrompt, userPrompt) {
-  if (OPENAI_API_KEY) {
-    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + OPENAI_API_KEY
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0.35,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ]
-      })
-    });
-    const json = await resp.json();
-    const txt = json?.choices?.[0]?.message?.content;
-    if (txt) return txt.replace(/^```(?:javascript|js)?\s*/i, "").replace(/```$/i, "").trim();
-  }
-  return null;
+// الذكاء الاصطناعي + إكمال ملف ZIP بأوامر البوت الحالي
+function getCurrentBotCommandFiles() {
+  const cmdsDir = path.join(ROOT, "commands");
+  if (!fs.existsSync(cmdsDir)) return [];
+  return fs.readdirSync(cmdsDir)
+    .filter(f => f.endsWith(".js"))
+    .map(f => ({
+      name: f.slice(0, -3),
+      fileName: f,
+      content: fs.readFileSync(path.join(cmdsDir, f), "utf8")
+    }));
 }
 
-function buildSmartFallbackCode(mode, commandName, sourceCode, prompt) {
-  if (mode === "add-command") {
-    const cmd = (commandName || "custom").replace(/[^a-zA-Z0-9_\u0600-\u06FF]/g, "");
-    return `module.exports = {
-  name: "${cmd}",
-  description: ${JSON.stringify(prompt || "أمر مخصص")},
-  async run(api, event, args) {
-    const text = args.join(" ").trim();
-    return api.sendMessage("⚡ تم تشغيل الأمر (${cmd}) بنجاح" + (text ? "\\nالمدخل: " + text : ""), event.threadID, event.messageID);
+function adaptCommandToTargetBot(cmdObj, botName, libraryName) {
+  const safeBot = botName || "BOT";
+  const safeLib = libraryName || "fca";
+  return `// مضاف تلقائياً من أوامر ${safeBot} (مكتبة: ${safeLib})
+// الأصل: ${cmdObj.fileName}
+${cmdObj.content}
+`;
+}
+
+function extractZipOrSingleFile(buffer, originalName, targetDir) {
+  fs.mkdirSync(targetDir, { recursive: true });
+  const ext = path.extname(String(originalName || "")).toLowerCase();
+  if (ext === ".zip") {
+    const zipPath = path.join(targetDir, "uploaded.zip");
+    fs.writeFileSync(zipPath, buffer);
+    const extractDir = path.join(targetDir, "extracted");
+    fs.mkdirSync(extractDir, { recursive: true });
+    const res = spawnSync("unzip", ["-q", "-o", zipPath, "-d", extractDir]);
+    if (res.status !== 0) {
+      throw new Error("تعذر فك ضغط ملف ZIP على الخادم (تأكد من توفر أداة unzip)");
+    }
+    return extractDir;
   }
-};`;
+  const singlePath = path.join(targetDir, path.basename(originalName || "bot.js"));
+  fs.writeFileSync(singlePath, buffer);
+  return targetDir;
+}
+
+function createZipArchive(sourceDir, outZipPath) {
+  const res = spawnSync("zip", ["-q", "-r", outZipPath, "."], { cwd: sourceDir });
+  if (res.status !== 0) {
+    throw new Error("تعذر إنشاء ملف ZIP النهائي (تأكد من توفر أداة zip)");
   }
-  if (mode === "edit-bot") {
-    const base = String(sourceCode || "").trim() || `const fs = require("fs");\n// بوت أساسي\n`;
-    return `${base}\n\n// --- تعديلات الذكاء الاصطناعي ---\n// المطلوب: ${String(prompt || "تحسين الأداء وإضافة أوامر").replace(/\r?\n/g, " ")}\nmodule.exports.__aiUpdatedAt = ${JSON.stringify(new Date().toISOString())};\n`;
-  }
-  return `"use strict";
+}
+
+app.post("/api/sessions/:id/ai/complete-zip", auth, upload.single("archive"), async (req, res) => {
+  const id = validSession(req, res);
+  if (!id) return;
+
+  try {
+    const botName = String(req.body?.botName || "SHADOW").trim();
+    const libraryName = String(req.body?.libraryName || "fca").trim();
+    const selectedRaw = String(req.body?.selectedCommands || "").trim();
+    const extraNote = String(req.body?.prompt || "").trim();
+
+    const availableCmds = getCurrentBotCommandFiles();
+    const requestedNames = selectedRaw
+      ? selectedRaw.split(",").map(s => s.trim().toLowerCase()).filter(Boolean)
+      : availableCmds.slice(0, 8).map(c => c.name.toLowerCase());
+
+    const chosenCmds = availableCmds.filter(c => requestedNames.includes(c.name.toLowerCase()));
+    const cmdsToAdd = chosenCmds.length ? chosenCmds : availableCmds.slice(0, 5);
+
+    const workId = `job-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+    const workDir = path.join(WORKSPACE_ZIP_DIR, workId);
+    let packageRoot = path.join(workDir, "extracted");
+    fs.mkdirSync(packageRoot, { recursive: true });
+
+    if (req.file && req.file.buffer) {
+      packageRoot = extractZipOrSingleFile(req.file.buffer, req.file.originalname, workDir);
+    } else {
+      fs.writeFileSync(
+        path.join(packageRoot, "index.js"),
+        `// بوت ${botName} (مكتبة: ${libraryName})\nconsole.log("${botName} initialized with ${libraryName}");\n`,
+        "utf8"
+      );
+    }
+
+    const outCmdsDir = path.join(packageRoot, "commands");
+    fs.mkdirSync(outCmdsDir, { recursive: true });
+
+    const addedNames = [];
+    for (const cmd of cmdsToAdd) {
+      fs.writeFileSync(path.join(outCmdsDir, cmd.fileName), adaptCommandToTargetBot(cmd, botName, libraryName), "utf8");
+      addedNames.push(cmd.name);
+    }
+
+    const loaderCode = `"use strict";
 const fs = require("fs");
 const path = require("path");
 
-// بوت منشأ بواسطة استوديو SHADOW الذكي
-// الوصف: ${String(prompt || "بوت ماسنجر متكامل").replace(/\r?\n/g, " ")}
+// محمّل أوامر مضاف للبوت: ${botName} | المكتبة: ${libraryName}
+// ملاحظات: ${extraNote || "إضافة أوامر البوت الحالي"}
 
-function createBot(loginFn, appStatePath) {
-  const appState = JSON.parse(fs.readFileSync(appStatePath, "utf8"));
-  loginFn({ appState }, (err, api) => {
-    if (err || !api) return console.error("فشل تسجيل الدخول:", err);
-    api.setOptions({ listenEvents: true, selfListen: false });
-    console.log("✅ البوت جاهز ويعمل!");
-
-    api.listenMqtt((listenErr, event) => {
-      if (listenErr || !event || !event.body) return;
-      const body = String(event.body).trim();
-      if (body === "!ping" || body === "بينغ") {
-        api.sendMessage("🏓 شغال بسرعة ممتازة!", event.threadID, event.messageID);
-      } else if (body === "!مساعدة" || body === "!help") {
-        api.sendMessage("📌 الأوامر المتاحة:\\n• !ping\\n• !مساعدة", event.threadID, event.messageID);
-      }
-    });
-  });
+function loadInjectedCommands(commandsFolder = path.join(__dirname, "commands")) {
+  const loaded = new Map();
+  if (!fs.existsSync(commandsFolder)) return loaded;
+  for (const file of fs.readdirSync(commandsFolder).filter(f => f.endsWith(".js"))) {
+    const mod = require(path.join(commandsFolder, file));
+    const key = String(mod?.name || file.slice(0, -3)).toLowerCase();
+    loaded.set(key, mod);
+  }
+  return loaded;
 }
 
-module.exports = { createBot };
+module.exports = { loadInjectedCommands, botName: ${JSON.stringify(botName)}, libraryName: ${JSON.stringify(libraryName)} };
 `;
+    fs.writeFileSync(path.join(packageRoot, "injected-commands-loader.js"), loaderCode, "utf8");
+
+    const finalZipName = `${botName.replace(/[^a-zA-Z0-9_-]/g, "_") || "bot"}-completed-${Date.now()}.zip`;
+    const finalZipPath = path.join(GENERATED_BOTS_DIR, finalZipName);
+    createZipArchive(packageRoot, finalZipPath);
+
+    res.json({
+      ok: true,
+      fileName: finalZipName,
+      downloadUrl: `/api/ai/download/${encodeURIComponent(finalZipName)}`,
+      summary: `اسم البوت: ${botName}\nالمكتبة: ${libraryName}\nالأوامر المضافة من بوتك الحالي (${addedNames.length}): ${addedNames.join(", ") || "لا توجد"}\n\n${loaderCode}`
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message || "تعذر إكمال ملف ZIP" });
+  }
+});
+
+async function callAiModel(systemPrompt, userPrompt) {
+  if (!OPENAI_API_KEY) return null;
+  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + OPENAI_API_KEY
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      temperature: 0.35,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ]
+    })
+  });
+  const json = await resp.json();
+  const txt = json?.choices?.[0]?.message?.content;
+  if (!txt) return null;
+  return txt.replace(/^```(?:javascript|js)?\s*/i, "").replace(/```$/i, "").trim();
 }
 
 app.post("/api/sessions/:id/ai/studio", auth, async (req, res) => {
@@ -1233,32 +1313,25 @@ app.post("/api/sessions/:id/ai/studio", auth, async (req, res) => {
   if (!id) return;
 
   const mode = String(req.body?.mode || "add-command");
+  const botName = String(req.body?.botName || "BOT").trim();
+  const libraryName = String(req.body?.libraryName || "fca").trim();
   const commandName = String(req.body?.commandName || "custom").trim();
   const sourceCode = String(req.body?.sourceCode || "");
   const prompt = String(req.body?.prompt || "").trim();
 
-  let systemPrompt = "أنت مهندس برمجيات خبير في Node.js وبوتات ماسنجر. أعد كود JavaScript نظيفاً ومباشراً فقط دون شرح زائد.";
-  let userPrompt = prompt;
-  if (mode === "add-command") {
-    userPrompt = `اكتب ملف أمر Node.js باسم "${commandName}" يقبل (api, event, args) وينفذ المطلوب: ${prompt}`;
-  } else if (mode === "edit-bot") {
-    userPrompt = `عدّل كود البوت التالي حسب المطلوب:\nالمطلوب: ${prompt}\n\nالكود الحالي:\n${sourceCode}`;
-  } else {
-    userPrompt = `اصنع كود بوت Node.js كامل بناءً على الوصف التالي: ${prompt}`;
-  }
+  const systemPrompt = "أنت مهندس برمجيات خبير في Node.js وبوتات الدردشة. أعد كود JavaScript نظيفاً ومباشراً فقط.";
+  const userPrompt = mode === "add-command"
+    ? `اكتب أمر Node.js باسم "${commandName}" للبوت "${botName}" بمكتبة "${libraryName}" ينفذ: ${prompt}`
+    : mode === "edit-bot"
+      ? `عدّل كود البوت التالي (${botName} / ${libraryName}) حسب المطلوب: ${prompt}\n\nالكود:\n${sourceCode}`
+      : `اصنع بوت Node.js كامل باسم "${botName}" يعتمد على مكتبة "${libraryName}" بناءً على: ${prompt}`;
 
-  const aiResult = await callAiModel(systemPrompt, userPrompt);
-  const code = aiResult || buildSmartFallbackCode(mode, commandName, sourceCode, prompt);
+  const aiCode = await callAiModel(systemPrompt, userPrompt);
+  const code = aiCode || `// بوت ${botName} (${libraryName})\n// ${prompt}\nmodule.exports = { name: "${commandName}", run: async (api, event) => api.sendMessage("✅ ${botName} ready", event.threadID) };`;
 
-  const safeFile = `${mode}-${Date.now()}-${crypto.randomBytes(3).toString("hex")}.js`;
-  fs.writeFileSync(path.join(GENERATED_BOTS_DIR, safeFile), code, "utf8");
-
-  res.json({
-    ok: true,
-    code,
-    fileName: safeFile,
-    downloadUrl: `/api/ai/download/${encodeURIComponent(safeFile)}`
-  });
+  const fileName = `${mode}-${Date.now()}.js`;
+  fs.writeFileSync(path.join(GENERATED_BOTS_DIR, fileName), code, "utf8");
+  res.json({ ok: true, code, fileName, downloadUrl: `/api/ai/download/${encodeURIComponent(fileName)}` });
 });
 
 app.get("/api/ai/download/:file", auth, (req, res) => {
@@ -1310,6 +1383,7 @@ function addBotLog(id, val) {
   for (const line of String(val).split(/\r?\n/).filter(Boolean)) {
     st.logs.push({ time: new Date().toISOString(), text: line });
     if (st.logs.length > 300) st.logs.shift();
+    console.log("[BOT " + id + "]", line);
   }
 }
 
@@ -1318,20 +1392,41 @@ function startManagedBot(id = "1") {
   const st = getBotState(id);
   const files = getSessionFiles(id);
   const entry = path.join(__dirname, "index.js");
+
   if (st.process && st.process.exitCode === null) throw new Error("الجلسة تعمل بالفعل");
   if (!fs.existsSync(entry)) throw new Error("ملف تشغيل البوت غير موجود");
-  if (!fs.existsSync(files.session)) throw new Error("ارفع appState لهذه الجلسة أولاً");
+  if (!fs.existsSync(files.session) || !fs.readFileSync(files.session, "utf8").trim()) {
+    throw new Error("ارفع ملف appState لهذه الجلسة أولاً");
+  }
+
+  let appState;
+  try { appState = JSON.parse(fs.readFileSync(files.session, "utf8")); }
+  catch { throw new Error("ملف appState ليس JSON صالحاً"); }
+
+  if (!Array.isArray(appState) ||
+      !appState.some(x => x && [x.key, x.name].includes("c_user") && typeof x.value === "string" && x.value.trim()) ||
+      !appState.some(x => x && [x.key, x.name].includes("xs") && typeof x.value === "string" && x.value.trim())) {
+    throw new Error("ملف الجلسة يجب أن يحتوي على c_user و xs بقيم غير فارغة");
+  }
 
   st.logs.length = 0;
   const child = spawn(process.execPath, [entry], {
     cwd: ROOT,
-    env: { ...process.env, NODE_ENV: "", SHADOW_SESSION_ID: id, SHADOW_DATA_DIR: DATA_DIR },
+    env: {
+      ...process.env,
+      NODE_ENV: "",
+      SHADOW_SESSION_ID: id,
+      SHADOW_BOT_PORT: String(files.port),
+      SHADOW_DATA_DIR: DATA_DIR
+    },
     stdio: ["ignore", "pipe", "pipe"]
   });
+
   st.process = child;
   st.startedAt = new Date().toISOString();
   child.stdout.on("data", d => addBotLog(id, d.toString()));
   child.stderr.on("data", d => addBotLog(id, "[stderr] " + d.toString()));
+  child.on("error", err => addBotLog(id, "خطأ تشغيل: " + err.message));
   child.on("exit", (code, sig) => {
     addBotLog(id, `انتهت العملية: code=${code} signal=${sig}`);
     if (st.process === child) st.process = null;
@@ -1365,18 +1460,49 @@ app.get("/api/sessions/:id/dashboard", auth, (req, res) => {
   const status = readJson(files.status, {});
   const botConfig = readJson(CONFIG_FILE, {});
   const sCfg = botConfig.SESSIONS?.[id] || {};
+  const commandsDir = path.join(ROOT, "commands");
+  const commands = fs.existsSync(commandsDir)
+    ? fs.readdirSync(commandsDir).filter(f => f.endsWith(".js")).map(f => f.slice(0, -3)).sort()
+    : [];
+
+  const devIds = Array.isArray(sCfg.DEV_IDS)
+    ? sCfg.DEV_IDS
+    : sCfg.DEV_ID
+      ? [String(sCfg.DEV_ID)]
+      : (Array.isArray(botConfig.DEV_IDS) ? botConfig.DEV_IDS : [String(botConfig.DEV_ID || "")].filter(Boolean));
+
   res.json({
     bot: {
       online: Boolean((st.process && st.process.exitCode === null) || status.online),
       botId: status.botId || null
     },
+    developerIds: devIds,
     prefix: data.prefix || "!",
     freePrefix: !!data.freePrefix,
     botNickname: String(sCfg.BOT_NICK || botConfig.BOT_NICK || ""),
     nicknameGuardEnabled: (sCfg.NICK_GUARD_ENABLED ?? botConfig.NICK_GUARD_ENABLED) !== false,
     developerNickname: String(sCfg.DEV_NICK || botConfig.DEV_NICK || ""),
-    developerNicknameGuardEnabled: (sCfg.DEV_NICK_GUARD_ENABLED ?? botConfig.DEV_NICK_GUARD_ENABLED) !== false
+    developerNicknameGuardEnabled: (sCfg.DEV_NICK_GUARD_ENABLED ?? botConfig.DEV_NICK_GUARD_ENABLED) !== false,
+    commands
   });
+});
+
+app.put("/api/sessions/:id/developer", auth, (req, res) => {
+  const id = validSession(req, res);
+  if (!id) return;
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(x => String(x).trim()).filter(Boolean) : [];
+  if (ids.length < 1 || ids.length > 2 || ids.some(v => !/^[0-9]{5,25}$/.test(v)) || new Set(ids).size !== ids.length) {
+    return res.status(400).json({ error: "أدخل معرفاً أو معرفين صحيحين من 5 إلى 25 رقماً" });
+  }
+  const config = readJson(CONFIG_FILE, {});
+  config.DEV_ID = ids[0];
+  config.DEV_IDS = ids;
+  config.SESSIONS = config.SESSIONS || {};
+  config.SESSIONS[id] = config.SESSIONS[id] || {};
+  config.SESSIONS[id].DEV_ID = ids[0];
+  config.SESSIONS[id].DEV_IDS = ids;
+  writeJsonAtomic(CONFIG_FILE, config);
+  res.json({ ok: true, message: "تم حفظ معرفات المطورين بنجاح" });
 });
 
 app.put("/api/sessions/:id/settings", auth, (req, res) => {
@@ -1428,6 +1554,10 @@ app.post("/api/sessions/:id/cookies", auth, (req, res) => {
     domain: x.domain || "facebook.com",
     path: x.path || "/"
   }));
+  const cookieMap = new Map(appState.map(x => [x.key, x.value]));
+  if (!cookieMap.has("c_user") || !cookieMap.has("xs")) {
+    return res.status(400).json({ error: "الكوكيز يجب أن تحتوي على c_user و xs" });
+  }
   writeJsonAtomic(getSessionFiles(id).session, appState);
   res.json({ ok: true, message: "تم حفظ الكوكيز بنجاح" });
 });
