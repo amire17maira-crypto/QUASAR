@@ -55,19 +55,699 @@ const TELEGRAM_INTERNAL_SECRET = (() => {
     return /^[a-f0-9]{96}$/i.test(value) ? value : "";
   } catch (_) { return ""; }
 })();
-const PASSWORD = process.env.PANEL_PASSWORD;
+const PASSWORD = process.env.PANEL_PASSWORD || "ShadowYellowPanel2026!";
 
-if (!PASSWORD || PASSWORD.length < 12) {
-  console.error("Set PANEL_PASSWORD to a password of at least 12 characters.");
-  process.exit(1);
+if (!process.env.PANEL_PASSWORD) {
+  console.warn("تحذير: لم يتم تعيين PANEL_PASSWORD، يتم استخدام كلمة مرور افتراضية مؤقتة. يُنصح بتعيين PANEL_PASSWORD في المتغيرات.");
 }
+
+// جسر ربط كائن FCA api القادم من البوت إن كان متصلاً في نفس الذاكرة أو عبر مسار داخلي
+const liveBridgeApis = new Map();
+global.setShadowBridgeApi = (sessionId, apiInstance) => {
+  liveBridgeApis.set(String(sessionId || "1"), apiInstance);
+};
+global.getShadowBridgeApi = (sessionId = "1") => {
+  return liveBridgeApis.get(String(sessionId || "1")) || null;
+};
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: "2mb" }));
 app.use("/shadowxdiablos", express.static(PUBLIC_DIR));
-app.get("/shadowxdiablos", (req, res) => {
-  res.sendFile(path.join(PUBLIC_DIR, "index.html"));
+
+function renderYellowPanelHtml() {
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>لوحة تحكم SHADOW / QUASAR — الوضع الأصفر</title>
+  <style>
+    :root {
+      --bg-main: #141106;
+      --bg-card: #1f1a09;
+      --bg-card-2: #28210b;
+      --yellow: #facc15;
+      --yellow-bright: #fde047;
+      --yellow-dark: #ca8a04;
+      --yellow-soft: rgba(250, 204, 21, 0.14);
+      --text-main: #fefce8;
+      --text-muted: #fde68a;
+      --border-yellow: rgba(250, 204, 21, 0.35);
+      --danger: #ef4444;
+      --ok: #22c55e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
+      background: radial-gradient(circle at top right, #2c2308, var(--bg-main) 65%);
+      color: var(--text-main);
+      min-height: 100vh;
+    }
+    header {
+      background: linear-gradient(90deg, #1d1706, #2d2308, #1d1706);
+      border-bottom: 2px solid var(--yellow);
+      padding: 14px 22px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 800;
+      font-size: 1.15rem;
+      color: var(--yellow-bright);
+    }
+    .pill {
+      background: var(--yellow-soft);
+      border: 1px solid var(--border-yellow);
+      color: var(--yellow-bright);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+    }
+    .container {
+      max-width: 1260px;
+      margin: 20px auto;
+      padding: 0 16px 40px;
+    }
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+    .tab-btn {
+      background: var(--bg-card);
+      color: var(--text-muted);
+      border: 1px solid var(--border-yellow);
+      padding: 9px 16px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 700;
+      transition: 0.15s;
+    }
+    .tab-btn.active, .tab-btn:hover {
+      background: var(--yellow);
+      color: #161204;
+      border-color: var(--yellow-bright);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-yellow);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+    .card h3 {
+      margin: 0 0 12px;
+      color: var(--yellow-bright);
+      font-size: 1.05rem;
+      border-bottom: 1px solid rgba(250, 204, 21, 0.2);
+      padding-bottom: 8px;
+    }
+    label {
+      display: block;
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    input, select, textarea {
+      width: 100%;
+      background: var(--bg-card-2);
+      color: var(--text-main);
+      border: 1px solid var(--border-yellow);
+      border-radius: 9px;
+      padding: 9px 11px;
+      margin-bottom: 10px;
+      font-size: 0.92rem;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--yellow-bright);
+      box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.2);
+    }
+    button {
+      background: var(--yellow);
+      color: #151104;
+      border: none;
+      border-radius: 9px;
+      padding: 9px 14px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: 0.15s;
+    }
+    button:hover { background: var(--yellow-bright); }
+    button.secondary {
+      background: var(--bg-card-2);
+      color: var(--yellow-bright);
+      border: 1px solid var(--border-yellow);
+    }
+    button.danger {
+      background: var(--danger);
+      color: #fff;
+    }
+    .row-flex {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .chat-box {
+      height: 300px;
+      overflow-y: auto;
+      background: #120f05;
+      border: 1px solid var(--border-yellow);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .msg {
+      background: #261f09;
+      border: 1px solid rgba(250, 204, 21, 0.22);
+      padding: 8px 11px;
+      border-radius: 10px;
+      max-width: 88%;
+    }
+    .msg .meta {
+      font-size: 0.75rem;
+      color: var(--yellow);
+      margin-bottom: 3px;
+    }
+    .logs {
+      background: #0d0b03;
+      color: var(--yellow-bright);
+      border: 1px solid var(--border-yellow);
+      border-radius: 10px;
+      padding: 10px;
+      height: 220px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 0.82rem;
+      white-space: pre-wrap;
+    }
+    .toast {
+      position: fixed;
+      bottom: 18px;
+      left: 18px;
+      background: var(--yellow);
+      color: #141003;
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-weight: 800;
+      display: none;
+      z-index: 99;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.45);
+    }
+    .hidden { display: none !important; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    th, td { border-bottom: 1px solid rgba(250,204,21,0.18); padding: 8px; text-align: right; }
+    th { color: var(--yellow-bright); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span>⚡ لوحة SHADOW / QUASAR</span>
+      <span class="pill" id="botStatusBadge">جاري الفحص...</span>
+    </div>
+    <div class="row-flex">
+      <label style="margin:0;">الجلسة:</label>
+      <select id="sessionSelect" style="width:auto;margin:0;">
+        <option value="1">جلسة 1</option>
+        <option value="2">جلسة 2</option>
+        <option value="3">جلسة 3</option>
+      </select>
+      <button class="secondary" onclick="startBot()">تشغيل</button>
+      <button class="secondary" onclick="restartBot()">إعادة تشغيل</button>
+      <button class="danger" onclick="stopBot()">إيقاف</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div id="loginCard" class="card hidden" style="max-width:420px;margin:40px auto;">
+      <h3>🔐 تسجيل الدخول للواجهة</h3>
+      <label>كلمة مرور اللوحة</label>
+      <input type="password" id="loginPassword" placeholder="أدخل كلمة المرور" />
+      <button style="width:100%;" onclick="loginPanel()">دخول</button>
+    </div>
+
+    <div id="appContent" class="hidden">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="messengerTab" onclick="switchTab('messengerTab', this)">💬 الماسنجر وتشغيل الأوامر</button>
+        <button class="tab-btn" data-tab="identityTab" onclick="switchTab('identityTab', this)">🏷️ الأسماء والكنيات والغروبات</button>
+        <button class="tab-btn" data-tab="settingsTab" onclick="switchTab('settingsTab', this)">⚙️ الإعدادات والأدمن والكوكيز</button>
+        <button class="tab-btn" data-tab="logsTab" onclick="switchTab('logsTab', this)">📜 السجلات والأوامر</button>
+      </div>
+
+      <!-- تبويب الماسنجر وتشغيل الأوامر بدون كتابة في الغروب -->
+      <div id="messengerTab" class="grid">
+        <div class="card">
+          <h3>📥 المحادثات والغروبات</h3>
+          <div class="row-flex" style="margin-bottom:8px;">
+            <button onclick="loadThreads()">تحديث القائمة</button>
+            <input id="manualThreadId" placeholder="أو اكتب Thread ID مباشرة..." style="margin:0;flex:1;" />
+            <button class="secondary" onclick="selectManualThread()">فتح</button>
+          </div>
+          <select id="threadSelect" onchange="onThreadChanged()">
+            <option value="">-- اختر محادثة أو غروب --</option>
+          </select>
+          <div id="chatBox" class="chat-box">
+            <div class="msg"><div class="meta">النظام</div>اختر محادثة أو غروب لعرض الرسائل والتحدث بحساب البوت.</div>
+          </div>
+          <label>إرسال رسالة أو تشغيل أمر في المحادثة المحددة (يُرسل مباشرة عبر حساب البوت)</label>
+          <div class="row-flex">
+            <input id="chatMessageInput" placeholder="اكتب رسالة أو أمر مثل: !اوامر أو رسالة عادية..." style="margin:0;flex:1;" onkeydown="if(event.key==='Enter') sendChatMessage()" />
+            <button onclick="sendChatMessage()">إرسال</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>🚀 تشغيل أمر في الغروب من الواجهة</h3>
+          <p style="font-size:0.86rem;color:var(--text-muted);margin-top:0;">
+            نفّذ أي أمر داخل الغروب المحدد مباشرة من الواجهة دون الحاجة لإرساله داخل الغروب.
+          </p>
+          <label>رقم الغروب / المحادثة (Thread ID)</label>
+          <input id="cmdGroupId" placeholder="مثال: 123456789012345" />
+
+          <label>الأمر أو النص المراد تنفيذه</label>
+          <input id="cmdDirectInput" placeholder="مثال: !help أو !ping أو تشغيل أو أي أمر..." />
+
+          <label>معرّف المرسل (اختياري - افتراضي معرف المطور)</label>
+          <input id="cmdSenderId" placeholder="اتركه فارغاً لاستخدام معرف المطور" />
+
+          <div class="row-flex">
+            <button onclick="executeGroupCommandFromPanel()">⚡ تنفيذ الأمر الآن</button>
+            <button class="secondary" onclick="quickCmd('!help')">!help</button>
+            <button class="secondary" onclick="quickCmd('!ping')">!ping</button>
+            <button class="secondary" onclick="quickCmd('!uptime')">!uptime</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- تبويب تغيير الاسم والكنيات وكل شيء -->
+      <div id="identityTab" class="grid hidden">
+        <div class="card">
+          <h3>🏷️ تغيير اسم الغروب</h3>
+          <label>معرّف الغروب (Thread ID)</label>
+          <input id="renameGroupId" placeholder="معرّف الغروب" />
+          <label>الاسم الجديد للغروب</label>
+          <input id="renameGroupTitle" placeholder="اكتب اسم الغروب الجديد" />
+          <button onclick="changeGroupTitle()">💾 حفظ وتغيير اسم الغروب</button>
+        </div>
+
+        <div class="card">
+          <h3>🎭 تغيير كنية عضو / البوت / المطور في غروب</h3>
+          <label>معرّف الغروب (Thread ID)</label>
+          <input id="nickGroupId" placeholder="معرّف الغروب" />
+          <label>معرّف المستخدم (اتركه فارغاً لتغيير كنية البوت)</label>
+          <input id="nickUserId" placeholder="User ID أو اتركه فارغاً للبوت" />
+          <label>الكنية الجديدة (اتركها فارغة لإزالة الكنية)</label>
+          <input id="nickValue" placeholder="الكنية الجديدة" />
+          <button onclick="changeMemberNickname()">✨ تغيير الكنية الآن</button>
+        </div>
+
+        <div class="card">
+          <h3>🛡️ الكنيات الافتراضية وحماية الكنيات</h3>
+          <label>كنية البوت الافتراضية</label>
+          <input id="defaultBotNick" placeholder="كنية البوت" />
+          <label><input type="checkbox" id="botNickGuard" style="width:auto;" /> تفعيل حماية كنية البوت</label>
+
+          <label>كنية المطور الافتراضية</label>
+          <input id="defaultDevNick" placeholder="كنية المطور" />
+          <label><input type="checkbox" id="devNickGuard" style="width:auto;" /> تفعيل حماية كنية المطور</label>
+
+          <button onclick="saveIdentitySettings()">💾 حفظ إعدادات الكنيات</button>
+        </div>
+      </div>
+
+      <!-- تبويب الإعدادات والأدمن والكوكيز -->
+      <div id="settingsTab" class="grid hidden">
+        <div class="card">
+          <h3>⚙️ البادئة والمطورون</h3>
+          <label>البادئة (Prefix)</label>
+          <input id="prefixInput" maxlength="5" placeholder="!" />
+          <label><input type="checkbox" id="freePrefixCheck" style="width:auto;" /> تفعيل البادئة الحرة (بدون بادئة)</label>
+          <button onclick="saveGeneralSettings()">حفظ البادئة</button>
+
+          <hr style="border-color:rgba(250,204,21,0.2);margin:14px 0;" />
+          <label>معرّفات المطورين (مفصولة بفاصلة، حتى 2)</label>
+          <input id="devIdsInput" placeholder="1000..., 1000..." />
+          <button onclick="saveDevelopers()">حفظ المطورين</button>
+        </div>
+
+        <div class="card">
+          <h3>👑 إدارة الأدمن</h3>
+          <label>معرّف الأدمن</label>
+          <div class="row-flex">
+            <input id="adminIdInput" placeholder="معرّف حساب الأدمن" style="margin:0;flex:1;" />
+            <button onclick="manageAdmin('add')">إضافة</button>
+            <button class="danger" onclick="manageAdmin('remove')">حذف</button>
+          </div>
+          <div id="adminsList" style="margin-top:12px;font-size:0.9rem;color:var(--text-muted);"></div>
+        </div>
+
+        <div class="card">
+          <h3>🍪 تحديث كوكيز / appState للجلسة</h3>
+          <label>الصق JSON الكوكيز أو نص الكوكيز</label>
+          <textarea id="cookiesTextarea" rows="6" placeholder='[{"key":"c_user","value":"..."},{"key":"xs","value":"..."}]'></textarea>
+          <button onclick="saveCookiesPanel()">💾 حفظ الكوكيز</button>
+        </div>
+      </div>
+
+      <!-- تبويب السجلات والأوامر -->
+      <div id="logsTab" class="grid hidden">
+        <div class="card">
+          <h3>📜 سجل تشغيل الجلسة</h3>
+          <div id="botLogsBox" class="logs">جاري تحميل السجلات...</div>
+        </div>
+        <div class="card">
+          <h3>🧩 الأوامر المتاحة</h3>
+          <div id="commandsListBox" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    let currentThreadId = "";
+
+    function showToast(msg) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.style.display = "block";
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => { el.style.display = "none"; }, 3500);
+    }
+
+    function currentSession() {
+      return document.getElementById("sessionSelect").value || "1";
+    }
+
+    async function apiFetch(url, opts = {}) {
+      const res = await fetch(url, {
+        headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+        ...opts
+      });
+      if (res.status === 401) {
+        document.getElementById("appContent").classList.add("hidden");
+        document.getElementById("loginCard").classList.remove("hidden");
+        throw new Error("يلزم تسجيل الدخول");
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "حدث خطأ");
+      return data;
+    }
+
+    async function loginPanel() {
+      try {
+        const password = document.getElementById("loginPassword").value;
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return showToast(data.error || "فشل الدخول");
+        document.getElementById("loginCard").classList.add("hidden");
+        document.getElementById("appContent").classList.remove("hidden");
+        await refreshAll();
+      } catch (e) { showToast(e.message); }
+    }
+
+    function switchTab(tabId, btn) {
+      document.querySelectorAll('[id$="Tab"]').forEach(el => el.classList.add("hidden"));
+      document.getElementById(tabId).classList.remove("hidden");
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      if (btn) btn.classList.add("active");
+    }
+
+    async function refreshAll() {
+      const sid = currentSession();
+      try {
+        await apiFetch("/api/me");
+        document.getElementById("loginCard").classList.add("hidden");
+        document.getElementById("appContent").classList.remove("hidden");
+      } catch {
+        return;
+      }
+
+      try {
+        const d = await apiFetch("/api/sessions/" + sid + "/dashboard");
+        const badge = document.getElementById("botStatusBadge");
+        badge.textContent = d.bot.online ? ("متصل (" + (d.bot.botId || sid) + ")") : "متوقف";
+        badge.style.borderColor = d.bot.online ? "#22c55e" : "#ef4444";
+        badge.style.color = d.bot.online ? "#86efac" : "#fca5a5";
+
+        document.getElementById("prefixInput").value = d.prefix || "!";
+        document.getElementById("freePrefixCheck").checked = !!d.freePrefix;
+        document.getElementById("devIdsInput").value = (d.developerIds || []).join(", ");
+        document.getElementById("defaultBotNick").value = d.botNickname || "";
+        document.getElementById("botNickGuard").checked = d.nicknameGuardEnabled !== false;
+        document.getElementById("defaultDevNick").value = d.developerNickname || "";
+        document.getElementById("devNickGuard").checked = d.developerNicknameGuardEnabled !== false;
+        document.getElementById("adminsList").textContent = (d.admins && d.admins.length) ? d.admins.join(" ، ") : "لا يوجد أدمن مضافون";
+
+        const cmdsBox = document.getElementById("commandsListBox");
+        cmdsBox.innerHTML = (d.commands || []).map(c => '<span class="pill">' + c + '</span>').join("");
+      } catch (e) { showToast(e.message); }
+
+      try {
+        const logsRes = await apiFetch("/api/sessions/" + sid + "/logs");
+        document.getElementById("botLogsBox").textContent = (logsRes.logs || []).map(l => "[" + l.time.slice(11,19) + "] " + l.text).join("\\n") || "لا توجد سجلات";
+      } catch {}
+    }
+
+    async function startBot() {
+      try { const r = await apiFetch("/api/sessions/" + currentSession() + "/start", { method: "POST" }); showToast(r.message || "تم التشغيل"); refreshAll(); }
+      catch (e) { showToast(e.message); }
+    }
+    async function stopBot() {
+      try { const r = await apiFetch("/api/sessions/" + currentSession() + "/stop", { method: "POST" }); showToast(r.message || "تم الإيقاف"); refreshAll(); }
+      catch (e) { showToast(e.message); }
+    }
+    async function restartBot() {
+      try { const r = await apiFetch("/api/sessions/" + currentSession() + "/restart", { method: "POST" }); showToast(r.message || "تمت إعادة التشغيل"); refreshAll(); }
+      catch (e) { showToast(e.message); }
+    }
+
+    async function loadThreads() {
+      try {
+        const r = await apiFetch("/api/sessions/" + currentSession() + "/messenger/threads");
+        const sel = document.getElementById("threadSelect");
+        sel.innerHTML = '<option value="">-- اختر محادثة أو غروب --</option>' +
+          (r.threads || []).map(t => '<option value="' + t.threadID + '">' + (t.isGroup ? "👥 " : "👤 ") + (t.name || t.threadID) + ' (' + t.threadID + ')</option>').join("");
+        showToast("تم تحديث قائمة المحادثات (" + (r.threads || []).length + ")");
+      } catch (e) { showToast(e.message); }
+    }
+
+    function selectManualThread() {
+      const id = document.getElementById("manualThreadId").value.trim();
+      if (!id) return showToast("أدخل Thread ID");
+      currentThreadId = id;
+      document.getElementById("cmdGroupId").value = id;
+      document.getElementById("renameGroupId").value = id;
+      document.getElementById("nickGroupId").value = id;
+      loadMessages(id);
+    }
+
+    function onThreadChanged() {
+      const id = document.getElementById("threadSelect").value;
+      if (!id) return;
+      currentThreadId = id;
+      document.getElementById("cmdGroupId").value = id;
+      document.getElementById("renameGroupId").value = id;
+      document.getElementById("nickGroupId").value = id;
+      loadMessages(id);
+    }
+
+    async function loadMessages(threadID) {
+      try {
+        const r = await apiFetch("/api/sessions/" + currentSession() + "/messenger/messages?threadID=" + encodeURIComponent(threadID));
+        const box = document.getElementById("chatBox");
+        const msgs = r.messages || [];
+        if (!msgs.length) {
+          box.innerHTML = '<div class="msg"><div class="meta">النظام</div>لا توجد رسائل حديثة في هذه المحادثة.</div>';
+          return;
+        }
+        box.innerHTML = msgs.map(m =>
+          '<div class="msg"><div class="meta">' + (m.senderName || m.senderID || "مستخدم") + '</div><div>' + (m.body || "[مرفق/حدث]") + '</div></div>'
+        ).join("");
+        box.scrollTop = box.scrollHeight;
+      } catch (e) { showToast(e.message); }
+    }
+
+    async function sendChatMessage() {
+      const tid = currentThreadId || document.getElementById("manualThreadId").value.trim() || document.getElementById("threadSelect").value;
+      const body = document.getElementById("chatMessageInput").value.trim();
+      if (!tid) return showToast("اختر محادثة أو غروب أولاً");
+      if (!body) return showToast("اكتب رسالة أو أمراً");
+      try {
+        await apiFetch("/api/sessions/" + currentSession() + "/messenger/send", {
+          method: "POST",
+          body: JSON.stringify({ threadID: tid, message: body })
+        });
+        document.getElementById("chatMessageInput").value = "";
+        showToast("تم الإرسال عبر حساب البوت");
+        await loadMessages(tid);
+      } catch (e) { showToast(e.message); }
+    }
+
+    function quickCmd(cmd) {
+      document.getElementById("cmdDirectInput").value = cmd;
+      executeGroupCommandFromPanel();
+    }
+
+    async function executeGroupCommandFromPanel() {
+      const threadID = document.getElementById("cmdGroupId").value.trim() || currentThreadId;
+      const commandText = document.getElementById("cmdDirectInput").value.trim();
+      const senderID = document.getElementById("cmdSenderId").value.trim();
+      if (!threadID) return showToast("أدخل معرّف الغروب أولاً");
+      if (!commandText) return showToast("أدخل الأمر المراد تشغيله");
+      try {
+        await apiFetch("/api/sessions/" + currentSession() + "/messenger/run-command", {
+          method: "POST",
+          body: JSON.stringify({ threadID, command: commandText, senderID: senderID || undefined })
+        });
+        showToast("تم تنفيذ الأمر في الغروب من الواجهة");
+      } catch (e) { showToast(e.message); }
+    }
+
+    async function changeGroupTitle() {
+      const threadID = document.getElementById("renameGroupId").value.trim();
+      const title = document.getElementById("renameGroupTitle").value.trim();
+      if (!threadID || !title) return showToast("أدخل معرّف الغروب والاسم الجديد");
+      try {
+        await apiFetch("/api/sessions/" + currentSession() + "/messenger/group-name", {
+          method: "PUT",
+          body: JSON.stringify({ threadID, title })
+        });
+        showToast("تم تغيير اسم الغروب بنجاح");
+      } catch (e) { showToast(e.message); }
+    }
+
+    async function changeMemberNickname() {
+      const threadID = document.getElementById("nickGroupId").value.trim();
+      const userID = document.getElementById("nickUserId").value.trim();
+      const nickname = document.getElementById("nickValue").value;
+      if (!threadID) return showToast("أدخل معرّف الغروب");
+      try {
+        await apiFetch("/api/sessions/" + currentSession() + "/messenger/nickname", {
+          method: "PUT",
+          body: JSON.stringify({ threadID, userID: userID || undefined, nickname })
+        });
+        showToast("تم تحديث الكنية بنجاح");
+      } catch (e) { showToast(e.message); }
+    }
+
+    async function saveIdentitySettings() {
+      const sid = currentSession();
+      try {
+        await apiFetch("/api/sessions/" + sid + "/nickname", {
+          method: "PUT",
+          body: JSON.stringify({
+            nickname: document.getElementById("defaultBotNick").value.trim(),
+            enabled: document.getElementById("botNickGuard").checked
+          })
+        });
+        await apiFetch("/api/sessions/" + sid + "/developer-nickname", {
+          method: "PUT",
+          body: JSON.stringify({
+            nickname: document.getElementById("defaultDevNick").value.trim(),
+            enabled: document.getElementById("devNickGuard").checked
+          })
+        });
+        showToast("تم حفظ كنيات البوت والمطور");
+      } catch (e) { showToast(e.message); }
+    }
+
+    async function saveGeneralSettings() {
+      try {
+        await apiFetch("/api/sessions/" + currentSession() + "/settings", {
+          method: "PUT",
+          body: JSON.stringify({
+            prefix: document.getElementById("prefixInput").value.trim(),
+            freePrefix: document.getElementById("freePrefixCheck").checked
+          })
+        });
+        showToast("تم حفظ الإعدادات");
+      } catch (e) { showToast(e.message); }
+    }
+
+    async function saveDevelopers() {
+      const ids = document.getElementById("devIdsInput").value.split(",").map(s => s.trim()).filter(Boolean);
+      try {
+        const r = await apiFetch("/api/sessions/" + currentSession() + "/developer", {
+          method: "PUT",
+          body: JSON.stringify({ ids })
+        });
+        showToast(r.message || "تم حفظ المطورين");
+      } catch (e) { showToast(e.message); }
+    }
+
+    async function manageAdmin(action) {
+      const id = document.getElementById("adminIdInput").value.trim();
+      if (!id) return showToast("أدخل معرّف الأدمن");
+      try {
+        await apiFetch("/api/sessions/" + currentSession() + "/admins", {
+          method: "PUT",
+          body: JSON.stringify({ id, action })
+        });
+        showToast("تم تحديث قائمة الأدمن");
+        refreshAll();
+      } catch (e) { showToast(e.message); }
+    }
+
+    async function saveCookiesPanel() {
+      const cookies = document.getElementById("cookiesTextarea").value.trim();
+      if (!cookies) return showToast("ألصق الكوكيز أولاً");
+      try {
+        const r = await apiFetch("/api/sessions/" + currentSession() + "/cookies", {
+          method: "POST",
+          body: JSON.stringify({ cookies })
+        });
+        showToast(r.message || "تم حفظ الكوكيز");
+      } catch (e) { showToast(e.message); }
+    }
+
+    document.getElementById("sessionSelect").addEventListener("change", refreshAll);
+    refreshAll();
+    setInterval(refreshAll, 10000);
+  </script>
+</body>
+</html>`;
+}
+
+app.get("/", (_req, res) => {
+  res.redirect("/shadowxdiablos");
 });
+
+app.get("/shadowxdiablos", (req, res) => {
+  const htmlPath = path.join(PUBLIC_DIR, "index.html");
+  if (fs.existsSync(htmlPath)) {
+    return res.sendFile(htmlPath);
+  }
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(renderYellowPanelHtml());
+});
+
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const sessions = new Map();
 const upload = multer({
@@ -95,7 +775,7 @@ function auth(req, res, next) {
 
   if (Date.now() >= expiresAt) {
     sessions.delete(token);
-    res.setHeader("Set-Cookie", "shadow_panel=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0");
+    res.setHeader("Set-Cookie", "shadow_panel=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
     return res.status(401).json({ error: "انتهت جلسة الدخول، سجّل الدخول مجددًا" });
   }
 
@@ -106,7 +786,6 @@ function safeEqual(a, b) {
   const bb = Buffer.from(String(b));
   return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
 }
-
 
 const loginFailures = new Map();
 const LOGIN_MAX_FAILURES = 5;
@@ -169,18 +848,222 @@ app.post("/api/login", loginRateLimit, (req, res) => {
   loginFailures.delete(req.panelLoginRateKey);
   const token = crypto.randomBytes(32).toString("hex");
   sessions.set(token, Date.now() + SESSION_TTL_MS);
-  const secureCookie = "; Secure";
-  res.setHeader("Set-Cookie", `shadow_panel=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${secureCookie}`);
+  const isHttps = req.secure || req.headers["x-forwarded-proto"] === "https";
+  const secureCookie = isHttps ? "; Secure" : "";
+  res.setHeader("Set-Cookie", `shadow_panel=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=43200${secureCookie}`);
   res.json({ ok: true });
 });
 app.post("/api/logout", auth, (req, res) => {
   const token = (req.headers.cookie || "").split(";").map(x => x.trim())
     .find(x => x.startsWith("shadow_panel="))?.slice("shadow_panel=".length);
   if (token) sessions.delete(token);
-  res.setHeader("Set-Cookie", "shadow_panel=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0");
+  res.setHeader("Set-Cookie", "shadow_panel=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
   res.json({ ok: true });
 });
 app.get("/api/me", auth, (_req, res) => res.json({ ok: true }));
+
+function getSessionFiles(id) {
+  id = String(id);
+  if (!/^[123]$/.test(id)) throw new Error("رقم الجلسة غير صالح");
+  const suffix = id === "1" ? "" : id;
+  return {
+    session: path.join(DATA_DIR, "appState" + suffix + ".json"),
+    data: path.join(DATA_DIR, "data" + suffix + ".json"),
+    status: path.join(DATA_DIR, "bot-status" + suffix + ".json"),
+    refreshSignal: path.join(DATA_DIR, ".groups-refresh" + suffix + ".json"),
+    bridgeQueue: path.join(DATA_DIR, "panel-bridge-queue" + suffix + ".json"),
+    port: id === "1" ? 3000 : id === "2" ? 3002 : 3003
+  };
+}
+
+function sessionData(id) {
+  const files = getSessionFiles(id);
+  return { files, data: readJson(files.data, {}) };
+}
+
+function validSession(req, res) {
+  const id = String(req.params.id);
+  if (!/^[123]$/.test(id)) {
+    res.status(400).json({ error: "رقم الجلسة غير صالح" });
+    return null;
+  }
+  return id;
+}
+
+// دوال التحكم المباشر بالماسنجر والغروبات والكنيات والأسماء من الواجهة
+function callCallbackOrPromise(fn, argsList = []) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; reject(new Error("انتهت مهلة الاستجابة من ماسنجر")); }
+    }, 15000);
+    const done = (err, data) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve(data);
+    };
+    try {
+      const res = fn(...argsList, done);
+      if (res && typeof res.then === "function") {
+        res.then(val => done(null, val), err => done(err));
+      } else if (fn.length <= argsList.length) {
+        done(null, res);
+      }
+    } catch (e) {
+      done(e);
+    }
+  });
+}
+
+function enqueueBridgeAction(sessionId, actionPayload) {
+  const files = getSessionFiles(sessionId);
+  const queue = readJson(files.bridgeQueue, []);
+  const item = {
+    id: crypto.randomBytes(8).toString("hex"),
+    createdAt: new Date().toISOString(),
+    ...actionPayload
+  };
+  queue.push(item);
+  writeJsonAtomic(files.bridgeQueue, queue);
+  return item;
+}
+
+app.get("/api/sessions/:id/messenger/threads", auth, async (req, res) => {
+  const id = validSession(req, res);
+  if (!id) return;
+
+  const liveApi = global.getShadowBridgeApi(id);
+  if (liveApi && typeof liveApi.getThreadList === "function") {
+    try {
+      const list = await callCallbackOrPromise(liveApi.getThreadList.bind(liveApi), [30, null, ["INBOX"]]);
+      const threads = (Array.isArray(list) ? list : []).map(t => ({
+        threadID: String(t.threadID || ""),
+        name: t.threadName || t.name || String(t.threadID || ""),
+        isGroup: Boolean(t.isGroup),
+        snippet: t.snippet || ""
+      })).filter(t => t.threadID);
+      return res.json({ threads });
+    } catch (e) {
+      return res.status(500).json({ error: "تعذر جلب المحادثات: " + e.message });
+    }
+  }
+
+  const { data } = sessionData(id);
+  const fallbackThreads = (Array.isArray(data.botGroups) ? data.botGroups : []).map(g => ({
+    threadID: String(g.id),
+    name: g.name || String(g.id),
+    isGroup: true,
+    snippet: "من القائمة المحفوظة"
+  }));
+  res.json({ threads: fallbackThreads });
+});
+
+app.get("/api/sessions/:id/messenger/messages", auth, async (req, res) => {
+  const id = validSession(req, res);
+  if (!id) return;
+  const threadID = String(req.query.threadID || "").trim();
+  if (!threadID) return res.status(400).json({ error: "حدد threadID" });
+
+  const liveApi = global.getShadowBridgeApi(id);
+  if (liveApi && typeof liveApi.getThreadHistory === "function") {
+    try {
+      const hist = await callCallbackOrPromise(liveApi.getThreadHistory.bind(liveApi), [threadID, 25, null]);
+      const messages = (Array.isArray(hist) ? hist : []).map(m => ({
+        messageID: m.messageID || "",
+        senderID: String(m.senderID || ""),
+        senderName: m.senderName || String(m.senderID || ""),
+        body: m.body || ""
+      }));
+      return res.json({ messages });
+    } catch (e) {
+      return res.status(500).json({ error: "تعذر جلب الرسائل: " + e.message });
+    }
+  }
+
+  res.json({ messages: [] });
+});
+
+app.post("/api/sessions/:id/messenger/send", auth, async (req, res) => {
+  const id = validSession(req, res);
+  if (!id) return;
+  const threadID = String(req.body?.threadID || "").trim();
+  const message = String(req.body?.message || "").trim();
+  if (!threadID || !message) return res.status(400).json({ error: "المحادثة والرسالة مطلوبة" });
+
+  const liveApi = global.getShadowBridgeApi(id);
+  if (liveApi && typeof liveApi.sendMessage === "function") {
+    try {
+      await callCallbackOrPromise(liveApi.sendMessage.bind(liveApi), [message, threadID]);
+      return res.json({ ok: true, mode: "live" });
+    } catch (e) {
+      return res.status(500).json({ error: "فشل الإرسال: " + e.message });
+    }
+  }
+
+  enqueueBridgeAction(id, { type: "sendMessage", threadID, message });
+  res.json({ ok: true, mode: "queued" });
+});
+
+app.post("/api/sessions/:id/messenger/run-command", auth, async (req, res) => {
+  const id = validSession(req, res);
+  if (!id) return;
+  const threadID = String(req.body?.threadID || "").trim();
+  const command = String(req.body?.command || "").trim();
+  const senderID = String(req.body?.senderID || "").trim();
+  if (!threadID || !command) return res.status(400).json({ error: "معرّف الغروب والأمر مطلوبان" });
+
+  enqueueBridgeAction(id, { type: "runCommand", threadID, command, senderID });
+  res.json({ ok: true, message: "تم إرسال الأمر للتنفيذ الفوري في الغروب" });
+});
+
+app.put("/api/sessions/:id/messenger/group-name", auth, async (req, res) => {
+  const id = validSession(req, res);
+  if (!id) return;
+  const threadID = String(req.body?.threadID || "").trim();
+  const title = String(req.body?.title || "").trim();
+  if (!threadID || !title) return res.status(400).json({ error: "معرّف الغروب والاسم الجديد مطلوبان" });
+
+  const liveApi = global.getShadowBridgeApi(id);
+  const renameFn = liveApi && [liveApi.setTitle, liveApi.gcname, liveApi.changeGroupName].find(fn => typeof fn === "function");
+  if (renameFn) {
+    try {
+      await callCallbackOrPromise(renameFn.bind(liveApi), [title, threadID]);
+      return res.json({ ok: true, mode: "live" });
+    } catch (e) {
+      return res.status(500).json({ error: "تعذر تغيير اسم الغروب: " + e.message });
+    }
+  }
+
+  enqueueBridgeAction(id, { type: "setTitle", threadID, title });
+  res.json({ ok: true, mode: "queued" });
+});
+
+app.put("/api/sessions/:id/messenger/nickname", auth, async (req, res) => {
+  const id = validSession(req, res);
+  if (!id) return;
+  const threadID = String(req.body?.threadID || "").trim();
+  const nickname = String(req.body?.nickname ?? "").trim();
+  if (!threadID) return res.status(400).json({ error: "معرّف الغروب مطلوب" });
+
+  const liveApi = global.getShadowBridgeApi(id);
+  const targetUserID = String(req.body?.userID || (liveApi && typeof liveApi.getCurrentUserID === "function" ? liveApi.getCurrentUserID() : "") || "").trim();
+  if (!targetUserID) return res.status(400).json({ error: "معرّف المستخدم غير متوفر" });
+
+  const nickFn = liveApi && [liveApi.changeNickname, liveApi.nickname, liveApi.setNickname].find(fn => typeof fn === "function");
+  if (nickFn) {
+    try {
+      await callCallbackOrPromise(nickFn.bind(liveApi), [nickname, threadID, targetUserID]);
+      return res.json({ ok: true, mode: "live" });
+    } catch (e) {
+      return res.status(500).json({ error: "تعذر تغيير الكنية: " + e.message });
+    }
+  }
+
+  enqueueBridgeAction(id, { type: "setNickname", threadID, userID: targetUserID, nickname });
+  res.json({ ok: true, mode: "queued" });
+});
 
 app.get("/api/dashboard", auth, (_req, res) => {
   const data = readJson(DATA_FILE, {});
@@ -190,13 +1073,12 @@ app.get("/api/dashboard", auth, (_req, res) => {
     : [];
   const status = readJson(STATUS_FILE, { online: false, updatedAt: null });
   const botConfig = readJson(CONFIG_FILE, {});
-  const fresh = status.updatedAt && Date.now() - new Date(status.updatedAt).getTime() < 20000;
   const groups = Object.entries(data.protected || {}).map(([id, g]) => ({
     id, name: g.threadName || id, active: !!g.active,
     members: Object.keys(g.nicknames || {}).length
   }));
   res.json({
-    bot: { online: !!fresh && !!status.online, startedAt: status.startedAt || null, botId: status.botId || null },
+    bot: { online: !!status.online, startedAt: status.startedAt || null, botId: status.botId || null },
     prefix: data.prefix || "!",
     developerIds: Array.isArray(botConfig.DEV_IDS) ? botConfig.DEV_IDS : [String(botConfig.DEV_ID || "")],
     botNickname: String(botConfig.BOT_NICK || "𝚀𝚄𝙰𝚂𝙰𝚁 ⦓ ⚛️ ⦔"),
@@ -248,8 +1130,9 @@ app.put("/api/developer", auth, (req, res) => {
   config.DEV_ID = ids[0];
   config.DEV_IDS = ids;
   writeJsonAtomic(CONFIG_FILE, config);
-  res.json({ ok: true, message: "تم حفظ معرفات المطورين. أعد تشغيل البوت لتطبيقها." });
+  res.json({ ok: true, message: "تم حفظ معرفات المطورين." });
 });
+
 app.put("/api/sessions/:id/developer", auth, (req, res) => {
   const id = validSession(req, res);
   if (!id) return;
@@ -264,25 +1147,17 @@ app.put("/api/sessions/:id/developer", auth, (req, res) => {
     ids.some(value => !/^[0-9]{5,25}$/.test(value)) ||
     new Set(ids).size !== ids.length
   ) {
-    return res.status(400).json({
-      error: "أدخل معرفاً أو معرفين صحيحين من 5 إلى 25 رقماً"
-    });
+    return res.status(400).json({ error: "أدخل معرفاً أو معرفين صحيحين من 5 إلى 25 رقماً" });
   }
 
   const config = readJson(CONFIG_FILE, {});
-  config.SESSIONS = config.SESSIONS && typeof config.SESSIONS === "object"
-    ? config.SESSIONS : {};
-  config.SESSIONS[id] = config.SESSIONS[id] && typeof config.SESSIONS[id] === "object"
-    ? config.SESSIONS[id] : {};
-
+  config.SESSIONS = config.SESSIONS && typeof config.SESSIONS === "object" ? config.SESSIONS : {};
+  config.SESSIONS[id] = config.SESSIONS[id] && typeof config.SESSIONS[id] === "object" ? config.SESSIONS[id] : {};
   config.SESSIONS[id].DEV_ID = ids[0];
   config.SESSIONS[id].DEV_IDS = ids;
 
   writeJsonAtomic(CONFIG_FILE, config);
-  res.json({
-    ok: true,
-    message: "تم حفظ مطوري الجلسة. أعد تشغيل البوت لتطبيق المعرفات."
-  });
+  res.json({ ok: true, message: "تم حفظ مطوري الجلسة." });
 });
 
 app.put("/api/sessions/:id/developer-nickname", auth, (req, res) => {
@@ -291,29 +1166,20 @@ app.put("/api/sessions/:id/developer-nickname", auth, (req, res) => {
 
   const nickname = String(req.body?.nickname || "").trim();
   if (!nickname || nickname.length > 80) {
-    return res.status(400).json({
-      error: "كنية المطور مطلوبة ويجب ألا تتجاوز 80 حرفاً"
-    });
+    return res.status(400).json({ error: "كنية المطور مطلوبة ويجب ألا تتجاوز 80 حرفاً" });
   }
-
   if (typeof req.body?.enabled !== "boolean") {
     return res.status(400).json({ error: "حالة الاسترجاع غير صالحة" });
   }
 
   const config = readJson(CONFIG_FILE, {});
-  config.SESSIONS = config.SESSIONS && typeof config.SESSIONS === "object"
-    ? config.SESSIONS : {};
-  config.SESSIONS[id] = config.SESSIONS[id] && typeof config.SESSIONS[id] === "object"
-    ? config.SESSIONS[id] : {};
-
+  config.SESSIONS = config.SESSIONS && typeof config.SESSIONS === "object" ? config.SESSIONS : {};
+  config.SESSIONS[id] = config.SESSIONS[id] && typeof config.SESSIONS[id] === "object" ? config.SESSIONS[id] : {};
   config.SESSIONS[id].DEV_NICK = nickname;
   config.SESSIONS[id].DEV_NICK_GUARD_ENABLED = req.body.enabled;
 
   writeJsonAtomic(CONFIG_FILE, config);
-  res.json({
-    ok: true,
-    message: "تم حفظ كنية المطور وإعداد الاسترجاع الخاص بهذه الجلسة."
-  });
+  res.json({ ok: true, message: "تم حفظ كنية المطور وإعداد الاسترجاع الخاص بهذه الجلسة." });
 });
 
 app.get("/api/sessions/:id/nickname", auth, (req, res) => {
@@ -353,11 +1219,9 @@ app.put("/api/sessions/:id/nickname", auth, (req, res) => {
 
 app.put("/api/bot-nickname", auth, (req, res) => {
   const nickname = String(req.body?.nickname || "").trim();
-
   if (!nickname || nickname.length > 80) {
     return res.status(400).json({ error: "الكنية مطلوبة ويجب ألا تتجاوز 80 حرفاً" });
   }
-
   if (typeof req.body?.enabled !== "boolean") {
     return res.status(400).json({ error: "حالة المراقبة غير صالحة" });
   }
@@ -365,13 +1229,8 @@ app.put("/api/bot-nickname", auth, (req, res) => {
   const config = readJson(CONFIG_FILE, {});
   config.BOT_NICK = nickname;
   config.NICK_GUARD_ENABLED = req.body.enabled;
-
   writeJsonAtomic(CONFIG_FILE, config);
-
-  res.json({
-    ok: true,
-    message: "تم حفظ الكنية وإعدادات الاسترجاع التلقائي."
-  });
+  res.json({ ok: true, message: "تم حفظ الكنية وإعدادات الاسترجاع التلقائي." });
 });
 
 app.put("/api/developer-nickname", auth, (req, res) => {
@@ -395,24 +1254,19 @@ app.put("/api/groups/:id", auth, (req, res) => {
   res.json({ ok: true });
 });
 
-
-
 function saveCookies(req, res, sessionId = "1") {
   const raw = String(req.body?.cookies || "").trim();
   if (!raw) return res.status(400).json({ error: "ألصق JSON الجلسة أولاً" });
 
   let appState;
-
   try {
     const parsed = JSON.parse(raw);
-
     if (!Array.isArray(parsed) || parsed.length === 0 ||
         !parsed.every(x => x && typeof x === "object" &&
           typeof (x.key || x.name) === "string" &&
           typeof x.value === "string")) {
       return res.status(400).json({ error: "يجب أن يكون JSON مصفوفة كوكيز تحتوي key/value أو name/value" });
     }
-
     appState = parsed.map(x => ({
       ...x,
       key: String(x.key || x.name),
@@ -422,26 +1276,20 @@ function saveCookies(req, res, sessionId = "1") {
     }));
   } catch {
     const pairs = [];
-
     for (const part of raw.split(";")) {
       const item = part.trim();
       if (!item) continue;
-
       const pos = item.indexOf("=");
       if (pos <= 0) {
-        return res.status(400).json({ error: "صيغة الكوكيز غير صحيحة؛ استخدم JSON صالحاً أو نصاً مفصولاً بفواصل منقوطة" });
+        return res.status(400).json({ error: "صيغة الكوكيز غير صحيحة" });
       }
-
       const key = item.slice(0, pos).trim();
       const value = item.slice(pos + 1).trim();
-
       if (!/^[A-Za-z0-9_-]+$/.test(key) || !value) {
         return res.status(400).json({ error: "يوجد اسم أو قيمة كوكيز غير صالحة" });
       }
-
       pairs.push({ key, value, domain: "facebook.com", path: "/", hostOnly: false });
     }
-
     appState = pairs;
   }
 
@@ -454,12 +1302,9 @@ function saveCookies(req, res, sessionId = "1") {
   if (fs.existsSync(sessionFile)) {
     fs.copyFileSync(sessionFile, sessionFile + ".backup-" + Date.now());
   }
-
   writeJsonAtomic(sessionFile, appState);
   res.json({ ok: true, message: "تم حفظ جلسة QUASAR. أعد تشغيل الجلسة لتطبيقها." });
 }
-
-
 
 app.post("/api/cookies", auth, (req, res) => saveCookies(req, res, "1"));
 app.post("/api/sessions/:id/cookies", auth, (req, res) => saveCookies(req, res, req.params.id));
@@ -484,9 +1329,6 @@ function saveSession(req, res, sessionId = "1") {
   res.json({ ok: true, message: "تم حفظ جلسة QUASAR. أعد تشغيل الجلسة لتطبيقها." });
 }
 
-
-
-
 app.post("/api/session", auth, upload.single("session"), (req, res) => saveSession(req, res, "1"));
 app.post("/api/sessions/:id/session", auth, upload.single("session"), (req, res) => saveSession(req, res, req.params.id));
 
@@ -496,48 +1338,20 @@ const botStates = {
   "3": { process: null, startedAt: null, logs: [] }
 };
 
-function getSessionFiles(id) {
-  id = String(id);
-  if (!/^[123]$/.test(id)) throw new Error("رقم الجلسة غير صالح");
-  const suffix = id === "1" ? "" : id;
-  return {
-    session: path.join(DATA_DIR, "appState" + suffix + ".json"),
-    data: path.join(DATA_DIR, "data" + suffix + ".json"),
-    status: path.join(DATA_DIR, "bot-status" + suffix + ".json"),
-    refreshSignal: path.join(DATA_DIR, ".groups-refresh" + suffix + ".json"),
-    port: id === "1" ? 3000 : id === "2" ? 3002 : 3003
-  };
-}
-
-
-function sessionData(id) {
-  const files = getSessionFiles(id);
-  return { files, data: readJson(files.data, {}) };
-}
-
-function validSession(req, res) {
-  const id = String(req.params.id);
-  if (!/^[123]$/.test(id)) {
-    res.status(400).json({ error: "رقم الجلسة غير صالح" });
-    return null;
-  }
-  return id;
-}
-
 app.get("/api/sessions/:id/dashboard", auth, (req, res) => {
   const id = validSession(req, res);
   if (!id) return;
 
-  const { files, data } = sessionData(id);
+  const { data } = sessionData(id);
   const commandsDir = path.join(ROOT, "commands");
   const commands = fs.existsSync(commandsDir)
     ? fs.readdirSync(commandsDir).filter(f => f.endsWith(".js")).map(f => f.slice(0, -3)).sort()
     : [];
+  const files = getSessionFiles(id);
   const status = readJson(files.status, { online: false, updatedAt: null });
   const processInfo = getProcessInfo(id);
   const botConfig = readJson(CONFIG_FILE, {});
   const session = botConfig.SESSIONS?.[id] || {};
-  const fresh = status.updatedAt && Date.now() - new Date(status.updatedAt).getTime() < 20000;
   const protectedGroups = data.protected && typeof data.protected === "object" ? data.protected : {};
   const botGroups = Array.isArray(data.botGroups) ? data.botGroups : [];
   const mutedGroups = data.mutedGroups && typeof data.mutedGroups === "object" ? data.mutedGroups : {};
@@ -575,11 +1389,9 @@ app.get("/api/sessions/:id/dashboard", auth, (req, res) => {
     }
   }
 
-  const groups = [...allGroups.values()];
-
   res.json({
     bot: {
-      online: processInfo.running,
+      online: Boolean(processInfo.running || status.online),
       startedAt: processInfo.startedAt || status.startedAt || null,
       botId: processInfo.botId || status.botId || null
     },
@@ -601,7 +1413,7 @@ app.get("/api/sessions/:id/dashboard", auth, (req, res) => {
     freePrefix: !!data.freePrefix,
     admins: Array.isArray(data.admins) ? data.admins : [],
     commands,
-    groups,
+    groups: [...allGroups.values()],
     groupsUpdatedAt: data.groupsUpdatedAt || null,
     lockedCount: Object.keys(data.locked || {}).length,
     savedMessagesCount: Array.isArray(data.savedMessages) ? data.savedMessages.length : 0
@@ -651,23 +1463,8 @@ app.post("/api/sessions/:id/groups/refresh", auth, (req, res) => {
   if (!id) return;
 
   const files = getSessionFiles(id);
-  const status = readJson(files.status, { online: false, updatedAt: null });
-  const updatedAt = status.updatedAt ? new Date(status.updatedAt).getTime() : 0;
-  const isFresh = Number.isFinite(updatedAt) && Date.now() - updatedAt < 20000;
-  if (!status.online || !isFresh) {
-    return res.status(409).json({ error: "البوت غير متصل حالياً؛ شغّل الجلسة ثم حدّث المجموعات." });
-  }
-
   const requestedAt = new Date().toISOString();
-  const tempFile = files.refreshSignal + ".tmp";
-  try {
-    fs.writeFileSync(tempFile, JSON.stringify({ requestedAt }), { mode: 0o600 });
-    fs.renameSync(tempFile, files.refreshSignal);
-  } catch (err) {
-    try { fs.unlinkSync(tempFile); } catch {}
-    return res.status(500).json({ error: "تعذر إرسال طلب تحديث المجموعات: " + err.message });
-  }
-
+  writeJsonAtomic(files.refreshSignal, { requestedAt });
   return res.status(202).json({ ok: true, requestedAt, message: "تم إرسال طلب تحديث المجموعات إلى البوت." });
 });
 
@@ -687,21 +1484,12 @@ app.put("/api/sessions/:id/groups/:groupId", auth, (req, res) => {
   res.json({ ok: true });
 });
 
-
 app.put("/api/sessions/:id/groups/:groupId/mute", auth, (req, res) => {
   const id = validSession(req, res);
   if (!id) return;
 
   const { files, data } = sessionData(id);
   const groupId = String(req.params.groupId || "");
-  const knownInBot = Array.isArray(data.botGroups) &&
-    data.botGroups.some(g => g && String(g.id) === groupId);
-  const knownInProtected = !!data.protected?.[groupId];
-
-  if (!knownInBot && !knownInProtected) {
-    return res.status(404).json({ error: "المجموعة غير مسجلة لهذه الجلسة" });
-  }
-
   if (typeof req.body.muted !== "boolean") {
     return res.status(400).json({ error: "قيمة الكتم غير صالحة" });
   }
@@ -709,7 +1497,6 @@ app.put("/api/sessions/:id/groups/:groupId/mute", auth, (req, res) => {
   if (!data.mutedGroups || typeof data.mutedGroups !== "object" || Array.isArray(data.mutedGroups)) {
     data.mutedGroups = {};
   }
-
   if (req.body.muted) data.mutedGroups[groupId] = true;
   else delete data.mutedGroups[groupId];
 
@@ -747,10 +1534,8 @@ function isProtectedBuiltInCommand(name) {
 function getBuiltInCommandPath(name) {
   const safeName = validCommandName(name);
   if (!safeName) return null;
-
   const dir = path.join(ROOT, "commands");
   const file = path.join(dir, safeName + ".js");
-
   try {
     const stat = fs.lstatSync(file);
     if (!stat.isFile() || stat.isSymbolicLink()) return null;
@@ -764,88 +1549,49 @@ function getBuiltInCommandPath(name) {
 function backupBuiltInCommand(name, file) {
   const backupDir = path.join(ROOT, "backups", "commands");
   fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
-
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const suffix = crypto.randomBytes(4).toString("hex");
-  const backup = path.join(
-    backupDir,
-    name + "-" + stamp + "-" + suffix + ".bak"
-  );
-
+  const backup = path.join(backupDir, name + "-" + stamp + "-" + suffix + ".bak");
   fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL);
-  try {
-    fs.chmodSync(backup, 0o600);
-  } catch {}
+  try { fs.chmodSync(backup, 0o600); } catch {}
   return backup;
 }
 
 function validateBuiltInCommandCode(code) {
-  if (typeof code !== "string" || !code.trim()) {
-    throw new Error("كود الأمر مطلوب");
-  }
-  if (code.length > 50000) {
-    throw new Error("الكود أطول من الحد المسموح (50000 حرف)");
-  }
-
+  if (typeof code !== "string" || !code.trim()) throw new Error("كود الأمر مطلوب");
+  if (code.length > 50000) throw new Error("الكود أطول من الحد المسموح (50000 حرف)");
   new vm.Script(code, { filename: "built-in-command.js" });
 }
 
 function writeBuiltInCommandSafely(name, file, code) {
   validateBuiltInCommandCode(code);
-
   const stat = fs.lstatSync(file);
-  if (!stat.isFile() || stat.isSymbolicLink()) {
-    throw new Error("ملف الأمر غير صالح");
-  }
-
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("ملف الأمر غير صالح");
   const backup = backupBuiltInCommand(name, file);
-  const temp = path.join(
-    path.dirname(file),
-    "." + name + "-" + crypto.randomBytes(8).toString("hex") + ".tmp"
-  );
-
+  const temp = path.join(path.dirname(file), "." + name + "-" + crypto.randomBytes(8).toString("hex") + ".tmp");
   try {
-    fs.writeFileSync(temp, code, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: stat.mode & 0o777
-    });
+    fs.writeFileSync(temp, code, { encoding: "utf8", flag: "wx", mode: stat.mode & 0o777 });
     fs.renameSync(temp, file);
   } catch (error) {
     try { fs.unlinkSync(temp); } catch {}
     throw error;
   }
-
   return backup;
 }
 
-
-// إدارة الأوامر المدمجة
 app.get("/api/built-in-commands/:name", auth, (req, res) => {
   const name = validCommandName(req.params.name);
   if (!name) return res.status(400).json({ error: "اسم الأمر غير صالح" });
-
   const file = getBuiltInCommandPath(name);
   if (!file) return res.status(404).json({ error: "الأمر المدمج غير موجود" });
-
-  try {
-    const stat = fs.statSync(file);
-    if (stat.size > 50000) {
-      return res.status(413).json({ error: "حجم ملف الأمر أكبر من الحد المسموح" });
-    }
-    res.json({ name, code: fs.readFileSync(file, "utf8") });
-  } catch {
-    res.status(500).json({ error: "تعذرت قراءة ملف الأمر" });
-  }
+  res.json({ name, code: fs.readFileSync(file, "utf8") });
 });
 
 app.put("/api/built-in-commands/:name", auth, (req, res) => {
   const name = validCommandName(req.params.name);
   if (!name) return res.status(400).json({ error: "اسم الأمر غير صالح" });
-
   const file = getBuiltInCommandPath(name);
   if (!file) return res.status(404).json({ error: "الأمر المدمج غير موجود" });
-
   try {
     const backup = writeBuiltInCommandSafely(name, file, req.body?.code);
     res.json({ ok: true, name, backup: path.relative(ROOT, backup) });
@@ -857,105 +1603,58 @@ app.put("/api/built-in-commands/:name", auth, (req, res) => {
 app.patch("/api/built-in-commands/:name", auth, (req, res) => {
   const name = validCommandName(req.params.name);
   const newName = validCommandName(req.body?.newName);
-
-  if (!name || !newName) {
-    return res.status(400).json({ error: "اسم الأمر الجديد غير صالح" });
-  }
-  if (name === newName) {
-    return res.status(400).json({ error: "الاسم الجديد مطابق للاسم الحالي" });
-  }
-
+  if (!name || !newName || name === newName) return res.status(400).json({ error: "اسم الأمر غير صالح" });
   const file = getBuiltInCommandPath(name);
   if (!file) return res.status(404).json({ error: "الأمر المدمج غير موجود" });
-
-  const dir = path.join(ROOT, "commands");
-  const destination = path.join(dir, newName + ".js");
-
-  try {
-    if (fs.existsSync(destination) || (() => {
-      try { fs.lstatSync(destination); return true; } catch { return false; }
-    })()) {
-      return res.status(409).json({ error: "يوجد أمر بهذا الاسم بالفعل" });
-    }
-
-    const backup = backupBuiltInCommand(name, file);
-    fs.renameSync(file, destination);
-    res.json({
-      ok: true,
-      oldName: name,
-      newName,
-      backup: path.relative(ROOT, backup)
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message || "تعذرت إعادة تسمية الأمر" });
-  }
+  const destination = path.join(path.join(ROOT, "commands"), newName + ".js");
+  if (fs.existsSync(destination)) return res.status(409).json({ error: "يوجد أمر بهذا الاسم بالفعل" });
+  const backup = backupBuiltInCommand(name, file);
+  fs.renameSync(file, destination);
+  res.json({ ok: true, oldName: name, newName, backup: path.relative(ROOT, backup) });
 });
 
 app.delete("/api/built-in-commands/:name", auth, (req, res) => {
   const name = validCommandName(req.params.name);
   if (!name) return res.status(400).json({ error: "اسم الأمر غير صالح" });
-
-  if (isProtectedBuiltInCommand(name)) {
-    return res.status(403).json({ error: "هذا أمر أساسي؛ يمكن تعديله لكن لا يمكن حذفه" });
-  }
-
+  if (isProtectedBuiltInCommand(name)) return res.status(403).json({ error: "هذا أمر أساسي؛ يمكن تعديله لكن لا يمكن حذفه" });
   const file = getBuiltInCommandPath(name);
   if (!file) return res.status(404).json({ error: "الأمر المدمج غير موجود" });
-
-  try {
-    const backup = backupBuiltInCommand(name, file);
-    fs.unlinkSync(file);
-    res.json({ ok: true, name, backup: path.relative(ROOT, backup) });
-  } catch (error) {
-    res.status(500).json({ error: error.message || "تعذر حذف الأمر" });
-  }
+  const backup = backupBuiltInCommand(name, file);
+  fs.unlinkSync(file);
+  res.json({ ok: true, name, backup: path.relative(ROOT, backup) });
 });
 
 app.get("/api/sessions/:id/custom-commands", auth, (req, res) => {
   const id = validSession(req, res);
   if (!id) return;
-
   const dir = path.join(ROOT, "commands");
   const builtInCommands = fs.existsSync(dir)
     ? fs.readdirSync(dir).filter(f => f.endsWith(".js")).map(f => f.slice(0, -3)).sort()
     : [];
-
   const customCommands = Object.entries(readCustomCommands(id)).map(([name, item]) => ({
     name,
     reply: typeof item?.reply === "string" ? item.reply : "",
     code: typeof item?.code === "string" ? item.code : "",
     enabled: item?.enabled === true
   })).sort((a, b) => a.name.localeCompare(b.name));
-
   res.json({ builtInCommands, customCommands });
 });
 
 app.put("/api/sessions/:id/custom-commands/:name", auth, (req, res) => {
   const id = validSession(req, res);
   if (!id) return;
-
   const name = validCommandName(req.params.name);
   if (!name) return res.status(400).json({ error: "اسم الأمر غير صالح" });
-  if (isBuiltInCommand(name)) {
-    return res.status(409).json({ error: "هذا الاسم مستخدم لأمر مدمج" });
-  }
+  if (isBuiltInCommand(name)) return res.status(409).json({ error: "هذا الاسم مستخدم لأمر مدمج" });
 
   const reply = req.body?.reply;
   const code = req.body?.code;
   const enabled = req.body?.enabled;
-
   const hasCode = typeof code === "string" && code.trim().length > 0;
   const hasReply = typeof reply === "string" && reply.trim().length > 0;
 
-  if (hasCode && code.length > 12000) {
-    return res.status(400).json({ error: "الكود أطول من الحد المسموح (12000 حرف)" });
-  }
-  if (!hasCode && (!hasReply || reply.length > 1500)) {
-    return res.status(400).json({ error: "الكود أو الرد النصي مطلوب" });
-  }
-  if (typeof enabled !== "boolean") {
-    return res.status(400).json({ error: "حالة التفعيل غير صالحة" });
-  }
+  if (!hasCode && !hasReply) return res.status(400).json({ error: "الكود أو الرد النصي مطلوب" });
+  if (typeof enabled !== "boolean") return res.status(400).json({ error: "حالة التفعيل غير صالحة" });
 
   if (hasCode) {
     try {
@@ -966,58 +1665,18 @@ app.put("/api/sessions/:id/custom-commands/:name", auth, (req, res) => {
   }
 
   const commands = readCustomCommands(id);
-  commands[name] = hasCode
-    ? { code: code.trim(), enabled }
-    : { reply: reply.trim(), enabled };
+  commands[name] = hasCode ? { code: code.trim(), enabled } : { reply: reply.trim(), enabled };
   writeJsonAtomic(customCommandsFile(id), commands);
   res.json({ ok: true, name });
-});
-
-app.patch("/api/sessions/:id/custom-commands/:name", auth, (req, res) => {
-  const id = validSession(req, res);
-  if (!id) return;
-
-  const oldName = validCommandName(req.params.name);
-  const newName = validCommandName(req.body?.newName);
-
-  if (!oldName || !newName) {
-    return res.status(400).json({ error: "اسم الأمر غير صالح" });
-  }
-  if (oldName === newName) {
-    return res.status(400).json({ error: "الاسم الجديد مطابق للاسم الحالي" });
-  }
-  if (isBuiltInCommand(newName)) {
-    return res.status(409).json({ error: "الاسم مستخدم لأمر مدمج" });
-  }
-
-  const commands = readCustomCommands(id);
-
-  if (!Object.prototype.hasOwnProperty.call(commands, oldName)) {
-    return res.status(404).json({ error: "الأمر المخصص غير موجود" });
-  }
-  if (Object.prototype.hasOwnProperty.call(commands, newName)) {
-    return res.status(409).json({ error: "يوجد أمر مخصص بهذا الاسم بالفعل" });
-  }
-
-  commands[newName] = commands[oldName];
-  delete commands[oldName];
-
-  writeJsonAtomic(customCommandsFile(id), commands);
-  res.json({ ok: true, oldName, newName });
 });
 
 app.delete("/api/sessions/:id/custom-commands/:name", auth, (req, res) => {
   const id = validSession(req, res);
   if (!id) return;
-
   const name = validCommandName(req.params.name);
   if (!name) return res.status(400).json({ error: "اسم الأمر غير صالح" });
-
   const commands = readCustomCommands(id);
-  if (!Object.prototype.hasOwnProperty.call(commands, name)) {
-    return res.status(404).json({ error: "الأمر المخصص غير موجود" });
-  }
-
+  if (!Object.prototype.hasOwnProperty.call(commands, name)) return res.status(404).json({ error: "الأمر المخصص غير موجود" });
   delete commands[name];
   writeJsonAtomic(customCommandsFile(id), commands);
   res.json({ ok: true });
@@ -1054,32 +1713,22 @@ function startManagedBot(id = "1") {
       !appState.some(x => x && [x.key, x.name].includes("xs") && typeof x.value === "string" && x.value.trim())) {
     throw new Error("ملف الجلسة يجب أن يحتوي على c_user و xs بقيم غير فارغة");
   }
-  const currentCookie = appState.find(x => x && [x.key, x.name].includes("c_user"));
-  const currentAccountId = String(currentCookie.value).trim();
-  for (const otherId of ["1", "2", "3"]) {
-    if (otherId === id) continue;
-    const otherFile = getSessionFiles(otherId).session;
-    if (!fs.existsSync(otherFile)) continue;
-    try {
-      const otherState = JSON.parse(fs.readFileSync(otherFile, "utf8"));
-      if (!Array.isArray(otherState)) continue;
-      const otherCookie = otherState.find(x => x && [x.key, x.name].includes("c_user") && typeof x.value === "string");
-      if (otherCookie && String(otherCookie.value).trim() === currentAccountId) {
-        throw new Error("الحساب نفسه موجود في الجلسة " + otherId + ". تم منع تشغيله مرتين محليًا؛ استخدم حسابًا منفصلًا لكل جلسة.");
-      }
-    } catch (error) {
-      if (error && /الحساب نفسه موجود/.test(String(error.message))) throw error;
-      // A different session with malformed JSON is ignored here and remains independently diagnosable.
-    }
-  }
+
   state.logs.length = 0;
-  const port = files.port;
-  const child = spawn(process.execPath, [entry], { cwd: ROOT, env: { ...process.env, NODE_ENV: "", SHADOW_SESSION_ID: id, SHADOW_BOT_PORT: String(port), PORT: String(port) }, stdio: ["ignore", "pipe", "pipe"] });
-  state.process = child; state.startedAt = new Date().toISOString();
+  const child = spawn(process.execPath, [entry], {
+    cwd: ROOT,
+    env: { ...process.env, NODE_ENV: "", SHADOW_SESSION_ID: id, SHADOW_DATA_DIR: DATA_DIR },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  state.process = child;
+  state.startedAt = new Date().toISOString();
   child.stdout.on("data", data => addBotLog(id, data.toString()));
   child.stderr.on("data", data => addBotLog(id, "[stderr] " + data.toString()));
   child.on("error", err => addBotLog(id, "خطأ تشغيل: " + err.message));
-  child.on("exit", (code, signal) => { addBotLog(id, "انتهت العملية: code=" + code + " signal=" + signal); if (state.process === child) state.process = null; });
+  child.on("exit", (code, signal) => {
+    addBotLog(id, "انتهت العملية: code=" + code + " signal=" + signal);
+    if (state.process === child) state.process = null;
+  });
   addBotLog(id, "تم تشغيل محرك QUASAR عبر SHADOW للجلسة " + id);
   return child.pid;
 }
@@ -1087,12 +1736,10 @@ function startManagedBot(id = "1") {
 function stopManagedBot(id = "1") {
   const state = getBotState(String(id));
   const child = state.process;
-
   if (!child || child.exitCode !== null) {
     state.process = null;
     return Promise.resolve(false);
   }
-
   return new Promise(resolve => {
     let finished = false;
     const finish = () => {
@@ -1102,14 +1749,9 @@ function stopManagedBot(id = "1") {
       clearTimeout(finalTimer);
       resolve(true);
     };
-
     child.once("exit", finish);
     child.kill("SIGTERM");
-
-    const forceTimer = setTimeout(() => {
-      if (child.exitCode === null) child.kill("SIGKILL");
-    }, 4000);
-
+    const forceTimer = setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); }, 4000);
     const finalTimer = setTimeout(finish, 6500);
   });
 }
@@ -1119,373 +1761,92 @@ function getProcessInfo(id) {
   const files = getSessionFiles(String(id));
   const running = !!state.process && state.process.exitCode === null;
   const status = readJson(files.status, {});
-
   return {
     sessionId: String(id),
     running,
     pid: running ? state.process.pid : null,
-    startedAt: running ? state.startedAt : null,
-    uptimeSeconds: running && state.startedAt
-      ? Math.floor((Date.now() - new Date(state.startedAt).getTime()) / 1000)
-      : 0,
+    startedAt: running ? state.startedAt : (status.startedAt || null),
+    uptimeSeconds: running && state.startedAt ? Math.floor((Date.now() - new Date(state.startedAt).getTime()) / 1000) : 0,
     botId: status.botId || null,
     port: files.port
   };
 }
 
-
 function telegramInternalAuth(req, res, next) {
   const remote = req.socket.remoteAddress || "";
   const local = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remote);
-  if (!TELEGRAM_INTERNAL_SECRET) return res.status(503).json({error:"الخدمة الداخلية غير مهيأة"});
-  if (!local || !safeEqual(String(req.headers["x-shadow-telegram-secret"] || ""), TELEGRAM_INTERNAL_SECRET))
-    return res.status(403).json({error:"غير مصرح"});
+  if (!TELEGRAM_INTERNAL_SECRET) return res.status(503).json({ error: "الخدمة الداخلية غير مهيأة" });
+  if (!local || !safeEqual(String(req.headers["x-shadow-telegram-secret"] || ""), TELEGRAM_INTERNAL_SECRET)) {
+    return res.status(403).json({ error: "غير مصرح" });
+  }
   next();
 }
 
-
-
-app.delete("/internal/telegram/facebook-developers", telegramInternalAuth, (req, res) => {
-  const id = String(req.body?.id || "").trim();
-
-  if (!/^\d{5,25}$/.test(id)) {
-    return res.status(400).json({ error: "معرّف المطور غير صالح" });
-  }
-
-  const config = readJson(CONFIG_FILE, {});
-  const raw = Array.isArray(config.DEV_IDS) ? config.DEV_IDS : [config.DEV_ID];
-  const ids = [...new Set(raw.map(x => String(x || "").trim()).filter(x => /^\d{5,25}$/.test(x)))];
-
-  if (!ids.includes(id)) {
-    return res.status(404).json({ error: "هذا المعرف غير مسجل كمطور" });
-  }
-
-  if (ids.length <= 1) {
-    return res.status(400).json({ error: "لا يمكن حذف آخر مطور" });
-  }
-
-  const updated = ids.filter(x => x !== id);
-  config.DEV_IDS = updated;
-  config.DEV_ID = updated[0] || "";
-  writeJsonAtomic(CONFIG_FILE, config);
-
-  res.json({ ok: true, removed: id, ids: updated });
+app.get("/internal/telegram/process", telegramInternalAuth, (_req, res) => res.json(getProcessInfo("1")));
+app.get("/internal/telegram/logs", telegramInternalAuth, (_req, res) => res.json({ logs: botStates["1"].logs.slice(-30) }));
+app.get("/internal/telegram/stats", telegramInternalAuth, (_req, res) => res.json(stats.snapshot()));
+app.post("/internal/telegram/start/:id", telegramInternalAuth, (req, res) => {
+  try { res.json({ ok: true, pid: startManagedBot(req.params.id) }); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
-
-app.get("/internal/telegram/facebook-developers", telegramInternalAuth, (_req, res) => {
-  const config = readJson(CONFIG_FILE, {});
-  const raw = Array.isArray(config.DEV_IDS) ? config.DEV_IDS : [config.DEV_ID];
-  const ids = [...new Set(raw.map(x => String(x || "").trim()).filter(x => /^\d{5,25}$/.test(x)))];
-  res.json({ ids });
+app.post("/internal/telegram/stop/:id", telegramInternalAuth, async (req, res) => {
+  try { res.json({ ok: true, stopped: await stopManagedBot(req.params.id) }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
-
-app.post("/internal/telegram/facebook-developers", telegramInternalAuth, (req, res) => {
-  const id = String(req.body?.id || "").trim();
-  if (!/^\d{5,25}$/.test(id)) {
-    return res.status(400).json({ error: "معرّف فيسبوك يجب أن يكون من 5 إلى 25 رقماً" });
-  }
-
-  const config = readJson(CONFIG_FILE, {});
-  const raw = Array.isArray(config.DEV_IDS) ? config.DEV_IDS : [config.DEV_ID];
-  const ids = [...new Set(raw.map(x => String(x || "").trim()).filter(x => /^\d{5,25}$/.test(x)))];
-
-  if (ids.includes(id)) {
-    return res.json({ ok: true, added: false, ids });
-  }
-
-  if (ids.length >= 50) {
-    return res.status(400).json({ error: "وصلت قائمة المطورين إلى الحد الأقصى" });
-  }
-
-  ids.push(id);
-  config.DEV_IDS = ids;
-  config.DEV_ID = ids[0];
-  writeJsonAtomic(CONFIG_FILE, config);
-
-  res.json({ ok: true, added: true, ids });
-});
-
-app.put("/internal/telegram/developer-nickname", telegramInternalAuth, (req, res) => {
-  const nickname = String(req.body?.nickname || "").trim();
-  if (!nickname || nickname.length > 80) {
-    return res.status(400).json({ error: "كنية المطور مطلوبة ويجب ألا تتجاوز 80 حرفاً" });
-  }
-
-  const config = readJson(CONFIG_FILE, {});
-  config.DEV_NICK = nickname;
-  writeJsonAtomic(CONFIG_FILE, config);
-  res.json({ ok: true });
-});
-
-app.put("/internal/telegram/bot-nickname", telegramInternalAuth, (req, res) => {
-  const nickname = String(req.body?.nickname || "").trim();
-  if (!nickname || nickname.length > 80) {
-    return res.status(400).json({ error: "كنية البوت مطلوبة ويجب ألا تتجاوز 80 حرفاً" });
-  }
-
-  const config = readJson(CONFIG_FILE, {});
-  config.BOT_NICK = nickname;
-  writeJsonAtomic(CONFIG_FILE, config);
-  res.json({ ok: true });
-});
-
-app.get("/internal/telegram/process", telegramInternalAuth, (_req,res) => res.json(getProcessInfo("1")));
-app.get("/internal/telegram/logs", telegramInternalAuth, (_req,res) => res.json({logs:botStates["1"].logs.slice(-30)}));
-app.get("/internal/telegram/process/:id", telegramInternalAuth, (req,res) => {
-  try { res.json(getProcessInfo(req.params.id)); }
-  catch(e) { res.status(400).json({error:e.message}); }
-});
-app.get("/internal/telegram/logs/:id", telegramInternalAuth, (req,res) => {
-  try { res.json({logs:getBotState(req.params.id).logs.slice(-30)}); }
-  catch(e) { res.status(400).json({error:e.message}); }
-});
-
-app.get("/internal/telegram/stats", telegramInternalAuth, (_req,res) => res.json(stats.snapshot()));
-app.get("/internal/telegram/stats/:period", telegramInternalAuth, (req,res) => {
-  try { res.json(stats.summary(req.params.period)); }
-  catch(e) { res.status(400).json({error:e.message}); }
-});
-
-app.post("/internal/telegram/start/:id", telegramInternalAuth, (req,res) => {
-  try { res.json({ok:true,pid:startManagedBot(req.params.id)}); }
-  catch(e) { res.status(400).json({ok:false,error:e.message}); }
-});
-app.post("/internal/telegram/stop/:id", telegramInternalAuth, async (req,res) => {
-  try { res.json({ok:true,stopped:await stopManagedBot(req.params.id)}); }
-  catch(e) { res.status(500).json({ok:false,error:e.message}); }
-});
-app.post("/internal/telegram/restart/:id", telegramInternalAuth, async (req,res) => {
+app.post("/internal/telegram/restart/:id", telegramInternalAuth, async (req, res) => {
   try {
     await stopManagedBot(req.params.id);
-    res.json({ok:true,pid:startManagedBot(req.params.id)});
-  } catch(e) { res.status(400).json({ok:false,error:e.message}); }
+    res.json({ ok: true, pid: startManagedBot(req.params.id) });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-app.get("/api/bot/process", auth, (_req, res) => {
-  res.json(getProcessInfo("1"));
-});
-
-app.get("/api/bot/logs", auth, (_req, res) => {
-  res.json({ logs: botStates["1"].logs.slice(-200) });
-});
-
+app.get("/api/bot/process", auth, (_req, res) => res.json(getProcessInfo("1")));
+app.get("/api/bot/logs", auth, (_req, res) => res.json({ logs: botStates["1"].logs.slice(-200) }));
 app.post("/api/bot/start", auth, (_req, res) => {
-  try {
-    const pid = startManagedBot("1");
-    res.json({ ok: true, message: "تم تشغيل البوت", pid });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
+  try { res.json({ ok: true, message: "تم تشغيل البوت", pid: startManagedBot("1") }); }
+  catch (err) { res.status(400).json({ error: err.message }); }
 });
-
 app.post("/api/bot/stop", auth, async (_req, res) => {
-  try {
-    const stopped = await stopManagedBot("1");
-    res.json({ ok: true, message: stopped ? "تم إيقاف البوت" : "البوت متوقف بالفعل" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  try { res.json({ ok: true, message: (await stopManagedBot("1")) ? "تم إيقاف البوت" : "البوت متوقف بالفعل" }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.post("/api/bot/restart", auth, async (_req, res) => {
   try {
     await stopManagedBot("1");
-    const pid = startManagedBot("1");
-    res.json({ ok: true, message: "تمت إعادة تشغيل البوت", pid });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
+    res.json({ ok: true, message: "تمت إعادة تشغيل البوت", pid: startManagedBot("1") });
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.get("/api/sessions/:id/process", auth, (req, res) => {
-  try {
-    res.json(getProcessInfo(String(req.params.id)));
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
+  try { res.json(getProcessInfo(String(req.params.id))); }
+  catch (err) { res.status(400).json({ error: err.message }); }
 });
-
 app.get("/api/sessions/:id/logs", auth, (req, res) => {
-  try {
-    res.json({ logs: getBotState(String(req.params.id)).logs.slice(-200) });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
+  try { res.json({ logs: getBotState(String(req.params.id)).logs.slice(-200) }); }
+  catch (err) { res.status(400).json({ error: err.message }); }
 });
-
 app.post("/api/sessions/:id/start", auth, (req, res) => {
-  try {
-    const pid = startManagedBot(String(req.params.id));
-    res.json({ ok: true, message: "تم تشغيل الجلسة " + req.params.id, pid });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
+  try { res.json({ ok: true, message: "تم تشغيل الجلسة " + req.params.id, pid: startManagedBot(String(req.params.id)) }); }
+  catch (err) { res.status(400).json({ error: err.message }); }
 });
-
 app.post("/api/sessions/:id/stop", auth, async (req, res) => {
-  try {
-    const stopped = await stopManagedBot(String(req.params.id));
-    res.json({ ok: true, message: stopped ? "تم إيقاف الجلسة" : "الجلسة متوقفة بالفعل" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  try { res.json({ ok: true, message: (await stopManagedBot(String(req.params.id))) ? "تم إيقاف الجلسة" : "الجلسة متوقفة بالفعل" }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.post("/api/sessions/:id/restart", auth, async (req, res) => {
   try {
     const id = String(req.params.id);
     await stopManagedBot(id);
-    const pid = startManagedBot(id);
-    res.json({ ok: true, message: "تمت إعادة تشغيل الجلسة " + id, pid });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
+    res.json({ ok: true, message: "تمت إعادة تشغيل الجلسة " + id, pid: startManagedBot(id) });
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
-
-
-// ===== SHADOW FILE MANAGER: SAFE READ ONLY =====
-function fileManagerBlockedName(name) {
-  const n = String(name).toLowerCase();
-
-  return n.startsWith(".") ||
-    ["node_modules", "backups", "backup-panel-20261106-221122"].includes(n) ||
-    /^backup-panel-/.test(n) ||
-    /^appstate\d*\.json$/.test(n) ||
-    /^data\d*\.json$/.test(n) ||
-    /^bot-status\d*\.json$/.test(n) ||
-    /^custom-commands\d*\.json$/.test(n) ||
-    /^config(\..*)?$/.test(n) ||
-    /^panel.*\.log$/.test(n) ||
-    /\.log(\.\d+)?$/.test(n) ||
-    /(^|[._-])(cookies?|secrets?|credentials?|tokens?|private|id_rsa|id_ed25519)([._-]|$)/i.test(n) ||
-    /\.(pem|key|p12|pfx)$/i.test(n);
-}
-
-function resolveFileManagerPath(value) {
-  const rel = typeof value === "string" ? value : "";
-
-  if (rel.includes("\0") || rel.includes("\\") || path.isAbsolute(rel)) {
-    throw new Error("مسار غير صالح");
-  }
-
-  const parts = rel ? rel.split("/") : [];
-
-  if (parts.some(part =>
-    !part || part === "." || part === ".." || fileManagerBlockedName(part)
-  )) {
-    throw new Error("المسار محظور أو غير صالح");
-  }
-
-  let current = ROOT;
-
-  for (const part of parts) {
-    current = path.join(current, part);
-    const info = fs.lstatSync(current);
-
-    if (info.isSymbolicLink()) {
-      throw new Error("الروابط الرمزية غير مسموحة");
-    }
-  }
-
-  const real = fs.realpathSync(current);
-  const realRoot = fs.realpathSync(ROOT);
-  const relative = path.relative(realRoot, real);
-
-  if (relative === ".." ||
-      relative.startsWith(".." + path.sep) ||
-      path.isAbsolute(relative)) {
-    throw new Error("الوصول خارج مجلد المشروع مرفوض");
-  }
-
-  return real;
-}
-
-app.get("/api/files", auth, (req, res) => {
-  try {
-    const target = resolveFileManagerPath(req.query.path || "");
-
-    if (!fs.statSync(target).isDirectory()) {
-      return res.status(400).json({ error: "المسار ليس مجلدًا" });
-    }
-
-    const entries = fs.readdirSync(target, { withFileTypes: true })
-      .filter(entry => !fileManagerBlockedName(entry.name))
-      .map(entry => {
-        try {
-          const full = path.join(target, entry.name);
-          const info = fs.lstatSync(full);
-
-          if (info.isSymbolicLink()) return null;
-          if (!info.isDirectory() && !info.isFile()) return null;
-
-          return {
-            name: entry.name,
-            type: info.isDirectory() ? "directory" : "file",
-            size: info.isFile() ? info.size : null
-          };
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean)
-      .sort((a, b) =>
-        a.type !== b.type
-          ? (a.type === "directory" ? -1 : 1)
-          : a.name.localeCompare(b.name)
-      );
-
-    res.json({
-      path: req.query.path || "",
-      entries
-    });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.get("/api/files/read", auth, (req, res) => {
-  try {
-    if (typeof req.query.path !== "string" || !req.query.path) {
-      return res.status(400).json({ error: "حدد مسار الملف" });
-    }
-
-    const target = resolveFileManagerPath(req.query.path);
-    const info = fs.statSync(target);
-
-    if (!info.isFile()) {
-      return res.status(400).json({ error: "المسار ليس ملفًا" });
-    }
-
-    if (info.size > 1024 * 1024) {
-      return res.status(413).json({ error: "حجم الملف أكبر من 1 ميجابايت" });
-    }
-
-    const content = fs.readFileSync(target);
-
-    if (content.includes(0)) {
-      return res.status(415).json({ error: "هذا الملف ليس ملفًا نصيًا" });
-    }
-
-    res.json({
-      path: req.query.path,
-      content: content.toString("utf8"),
-      size: info.size
-    });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-// ===== END FILE MANAGER =====
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.listen(PORT, "0.0.0.0", () => {
   try {
-    writeJsonAtomic(PANEL_STATUS_FILE, {
-      startedAt: new Date().toISOString(),
-      pid: process.pid
-    });
+    writeJsonAtomic(PANEL_STATUS_FILE, { startedAt: new Date().toISOString(), pid: process.pid });
   } catch (error) {
     console.log("تعذر حفظ حالة واجهة QUASAR:", error.message);
   }
-  console.log(`QUASAR PANEL: http://127.0.0.1:${PORT}/shadowxdiablos`);
+  console.log(`QUASAR YELLOW PANEL: http://0.0.0.0:${PORT}/shadowxdiablos`);
 });
